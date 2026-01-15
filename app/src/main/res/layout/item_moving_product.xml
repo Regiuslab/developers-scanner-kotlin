@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@drawable/item_moving_product_background">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        tools:ignore="UseCompoundDrawables">
+
+        <TextView
+            android:id="@+id/tvProductName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Фитинг обжимной под сварку сталь с патрубком офланц (фланец сталь L=300мм) (в комплекте со стальной гильзой обжимной) 58,5х4,0 А-РЕ-Х- ТУ ВУ 59036744"
+            tools:text="Товар1 с очень длинным названием в несколько строк для проверки переноса и высоты"
+            android:textColor="@color/white"
+            android:textSize="22sp"
+        android:textStyle="bold"
+        android:layout_weight="1" />
+
+        <ImageView
+            android:id="@+id/btnDelete"
+            android:layout_width="36dp"
+        android:layout_height="36dp"
+        android:src="@android:drawable/ic_delete"
+        android:padding="8dp"
+        app:tint="@android:color/holo_red_dark"
+        tools:ignore="ContentDescription" />
+    </LinearLayout>
+
+    <!-- Space 1 -->
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="0.5" />
+
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+
+        <Spinner
+            android:id="@+id/spinnerItem1"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:background="@drawable/input_field_yellow_border_blue_bg"
+            android:minHeight="64dp"
+        android:padding="12dp"
+            android:dropDownVerticalOffset="64dp"/>
+        <Spinner
+            android:id="@+id/spinnerItem2"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="16dp"
+        android:layout_weight="1"
+        android:background="@drawable/input_field_yellow_border_blue_bg"
+        android:minHeight="64dp"
+        android:padding="12dp"
+            android:dropDownVerticalOffset="64dp"/>
+    </LinearLayout>
+
+    <!-- Space 2 -->
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="0.5" />
+
+    <!-- Available Quantity Text -->
+    <TextView
+        android:id="@+id/tvAvailable"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Доступно: 57.0"
+        tools:text="Доступно: 123.0"
+        android:textColor="@color/white"
+        android:textSize="18sp"
+    />
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="0.3" />
+    <EditText
+        android:id="@+id/etQuantity"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+
+    android:background="@drawable/input_field_yellow_border_blue_bg"
+    android:inputType="numberDecimal"
+    android:hint="Введите количество"
+    android:textColorHint="@color/white"
+    android:textColor="@color/white"
+    android:textSize="20sp"
+    android:padding="16dp"
+    android:minHeight="64dp" />
+
+
+    <Space
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1.0" />
+
+</LinearLayout>

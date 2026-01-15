@@ -1,0 +1,200 @@
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="24dp"
+    android:background="@drawable/item_yellow_border_dark_bg"
+    android:layout_marginBottom="10dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:gravity="center_vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="56dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <TextView
+                android:id="@+id/tvProductName"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:text="Товар1"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:textColor="@color/white"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:clickable="false"
+                android:focusable="false"
+                android:focusableInTouchMode="false"/>
+
+            <ImageButton
+                android:id="@+id/btnDelete"
+                android:layout_width="56dp"
+                android:layout_height="56dp"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:padding="14dp"
+                app:srcCompat="@drawable/ic_delete_red"
+                app:tint="@color/holo_red_dark"
+                tools:ignore="ContentDescription" />
+
+        </LinearLayout>
+
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="0.1" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="72dp"
+            android:orientation="horizontal"
+            android:layout_marginTop="6dp">
+
+            <EditText
+                android:id="@+id/etQuantity"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:inputType="number"
+                android:hint="Количество"
+                android:textColor="@color/white"
+                android:textColorHint="@color/hint_white"
+                android:textSize="20sp"
+                android:gravity="center"
+                android:background="@drawable/input_field_yellow_border_blue_bg"
+                android:paddingHorizontal="12dp"
+                android:layout_marginEnd="10dp"
+               />
+
+            <Spinner
+                android:id="@+id/spinnerMeasure"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:background="@drawable/input_field_yellow_border_blue_bg"
+                android:paddingHorizontal="12dp"
+                android:textAlignment="center"
+                />
+        </LinearLayout>
+
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="0.07" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="72dp"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+
+            <EditText
+                android:id="@+id/etDiameter"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:inputType="numberDecimal"
+                android:hint="Диаметр"
+                android:textColor="@color/white"
+                android:textColorHint="@color/hint_white"
+                android:textSize="20sp"
+                android:gravity="center"
+                android:background="@drawable/input_field_yellow_border_blue_bg"
+                android:paddingHorizontal="12dp"
+                android:layout_marginEnd="10dp"
+               />
+
+            <EditText
+                android:id="@+id/etWeight"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:inputType="numberDecimal"
+                android:hint="Вес"
+                android:textColor="@color/white"
+                android:textColorHint="@color/hint_white"
+                android:textSize="20sp"
+                android:gravity="center"
+                android:background="@drawable/input_field_yellow_border_blue_bg"
+                android:paddingHorizontal="12dp"
+               />
+        </LinearLayout>
+
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="72dp"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp">
+
+            <EditText
+                android:id="@+id/etWallThickness"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:inputType="numberDecimal"
+                android:hint="Толщина стенки"
+                android:textColor="@color/white"
+                android:textColorHint="@color/hint_white"
+                android:textSize="20sp"
+                android:gravity="center"
+                android:background="@drawable/input_field_yellow_border_blue_bg"
+                android:paddingHorizontal="12dp"
+               />
+        </LinearLayout>
+
+
+        <Space
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="0.08" />
+
+        <LinearLayout
+            android:id="@+id/barcodeSection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:minHeight="72dp"
+            android:orientation="horizontal"
+            android:layout_marginTop="4dp"
+            android:layout_marginBottom="8dp">
+
+            <EditText
+                android:id="@+id/tvBarcode"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:hint="Штрихкод"
+                android:textSize="20sp"
+                android:textColor="@color/white"
+                android:textColorHint="@color/hint_white"
+                android:background="@drawable/input_field_yellow_border_blue_bg"
+            tools:ignore="Autofill,TextFields" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/tvBarcodeError"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Заполните штрихкод"
+            android:textColor="@android:color/holo_red_light"
+            android:textSize="12sp"
+            android:paddingTop="2dp"
+            android:visibility="gone"/>
+
+    </LinearLayout>
+</LinearLayout>

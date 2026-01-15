@@ -1,0 +1,137 @@
+<resources>
+
+    <style name="TableButton" parent="Widget.AppCompat.Button">
+        <item name="android:textColor">@color/white</item>
+        <item name="android:padding">12dp</item>
+        <item name="android:elevation">2dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:gravity">center</item>
+        <item name="android:minHeight">48dp</item>
+        <item name="android:backgroundTint">@null</item>
+    </style>
+
+    <style name="AddButton" parent="TableButton">
+        <item name="android:background">@drawable/btn_green</item>
+    </style>
+
+    <style name="SaveButton" parent="TableButton">
+        <item name="android:background">@drawable/btn_blue</item>
+    </style>
+
+    <style name="DeleteButton" parent="TableButton">
+        <item name="android:background">@drawable/btn_red</item>
+    </style>
+
+    <style name="DialogAnimation">
+        <item name="android:windowEnterAnimation">@android:anim/fade_in</item>
+        <item name="android:windowExitAnimation">@android:anim/fade_out</item>
+    </style>
+
+    <style name="ErrorTextAppearance" parent="@style/TextAppearance.Design.Error">
+        <item name="android:textSize">12sp</item>
+        <item name="android:textColor">@color/design_default_color_error</item>
+        <item name="android:paddingTop">4dp</item>
+    </style>
+
+    <style name="CircleNumericButton" parent="Widget.MaterialComponents.Button">
+        <item name="android:layout_width">72dp</item>
+        <item name="android:layout_height">72dp</item>
+        <item name="backgroundTint">@color/dark_blue</item>
+        <item name="android:textColor">@color/yellow</item>
+        <item name="android:textSize">24sp</item>
+        <item name="cornerRadius">36dp</item>
+        <item name="strokeColor">@color/yellow</item>
+        <item name="strokeWidth">5dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="android:padding">0dp</item>
+    </style>
+
+
+    <style name="MyCustomAlertDialog" parent="Theme.AppCompat.Light.Dialog.Alert">
+        <!-- Закругленный фон для всего окна диалога -->
+        <item name="android:windowBackground">@drawable/dialog_rounded_background</item>
+
+        <!-- Цвет фона основной контентной области диалога.
+             Обычно windowBackground достаточно, но для некоторых тем/версий это может быть полезно
+             для обеспечения сплошного цвета внутри закругленных углов.
+             Если windowBackground уже сплошной (как наш shape), это может быть избыточно, но не вредно. -->
+        <item name="android:background">@color/dark_blue</item> <!-- Убедитесь, что это тот же цвет, что и в shape -->
+
+        <!-- Цвет текста заголовка -->
+        <!-- titleTextColor из android namespace может не всегда переопределяться корректно
+             в AppCompat диалогах. Лучше использовать атрибуты AppCompat. -->
+        <item name="android:textColorPrimary">@color/yellow</item> <!-- Для заголовка -->
+
+        <!-- Цвет текста сообщения -->
+        <item name="android:textColorSecondary">@color/white</item> <!-- Используйте другой цвет для сообщения, если желтый на желтом плохо читаем. Или оставьте yellow, если фон кнопок другой. -->
+        <!-- Часто основной текст диалога лучше сделать белым или светло-серым на темном фоне для читаемости -->
+
+
+        <!-- Стиль для кнопок -->
+        <!-- colorAccent может влиять на цвет текста кнопок, но для более точного контроля лучше использовать buttonBar... стили -->
+        <item name="colorAccent">@color/yellow</item> <!-- Это может окрасить "галочки", радиокнопки и т.д. в диалоге, а также текст кнопок по умолчанию, если не переопределено ниже -->
+
+        <item name="buttonBarPositiveButtonStyle">@style/MyAlertDialog.Button.Positive</item>
+        <item name="buttonBarNegativeButtonStyle">@style/MyAlertDialog.Button.Negative</item>
+        <item name="buttonBarNeutralButtonStyle">@style/MyAlertDialog.Button.Neutral</item>
+    </style>
+
+    <!-- Стили для кнопок AlertDialog -->
+    <style name="MyAlertDialog.Button.Positive" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+        <item name="android:textColor">@color/yellow</item>
+        <!-- Можно добавить другие атрибуты, например, фон кнопки, если нужно -->
+        <!-- <item name="android:background">@drawable/my_custom_button_bg</item> -->
+    </style>
+
+    <style name="MyAlertDialog.Button.Negative" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+        <item name="android:textColor">@color/yellow</item>
+    </style>
+
+    <style name="MyAlertDialog.Button.Neutral" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+        <item name="android:textColor">@color/yellow</item>
+    </style>
+
+    <style name="MyCustomAlertDialog.Button" parent="Widget.AppCompat.Button.ButtonBar.AlertDialog">
+        <item name="android:textColor">@color/yellow</item>
+    </style>
+
+    <!-- НОВЫЕ СТИЛИ для MaterialAlertDialogBuilder -->
+    <style name="MyCustomMaterialAlertDialogStyle" parent="ThemeOverlay.MaterialComponents.MaterialAlertDialog">
+        <!-- Фоновый цвет окна диалога (голубой) -->
+        <item name="colorSurface">@color/dark_blue</item> <!-- Основной атрибут для фона Material диалогов -->
+        <item name="android:background">@color/dark_blue</item> <!-- Для совместимости/переопределения -->
+        <item name="android:windowBackground">@color/dark_blue</item> <!-- Для окна в целом -->
+
+        <!-- Стиль текста заголовка (желтый) -->
+        <item name="materialAlertDialogTitleTextStyle">@style/MyCustomMaterialAlertDialog.TitleText</item>
+
+        <!-- Стиль текста сообщения (желтый) (для случая "Нет доступных вариантов.") -->
+        <item name="materialAlertDialogBodyTextStyle">@style/MyCustomMaterialAlertDialog.BodyText</item>
+
+        <!-- Стиль кнопок (желтый текст) -->
+        <item name="buttonBarPositiveButtonStyle">@style/MyCustomMaterialAlertDialog.Button</item>
+        <item name="buttonBarNegativeButtonStyle">@style/MyCustomMaterialAlertDialog.Button</item>
+        <item name="buttonBarNeutralButtonStyle">@style/MyCustomMaterialAlertDialog.Button</item>
+    </style>
+
+    <style name="MyCustomMaterialAlertDialog.TitleText" parent="MaterialAlertDialog.MaterialComponents.Title.Text">
+        <item name="android:textColor">@color/yellow</item>
+        <item name="android:textSize">20sp</item> <!-- Можете настроить размер по необходимости -->
+    </style>
+
+    <style name="MyCustomMaterialAlertDialog.BodyText" parent="MaterialAlertDialog.MaterialComponents.Body.Text">
+        <item name="android:textColor">@color/yellow</item>
+        <item name="android:textSize">16sp</item> <!-- Можете настроить размер по необходимости -->
+    </style>
+
+    <style name="MyCustomMaterialAlertDialog.Button" parent="Widget.MaterialComponents.Button.TextButton.Dialog">
+        <item name="android:textColor">@color/yellow</item>
+        <item name="rippleColor">@color/yellow</item>
+        <item name="android:textSize">14sp</item> <!-- Можете настроить размер по необходимости -->
+    </style>
+
+</resources>

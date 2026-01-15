@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="blue">#215CF3</color>
+    <color name="holo_red_dark">#FD1103</color>
+    <color name="green">#4CAF50</color>
+    <color name="red">#FF4444</color>
+    <color name="dark_green">#388E3C</color>
+    <color name="dark_blue">#050E64</color>
+    <color name="dark_red">#5B0A00</color>
+    <color name="light_gray">#CEC5C5</color>
+    <color name="barcode">#E5E4E4</color>
+    <color name="gray">#BEBABA</color>
+    <color name="yellow">#EBA308</color>
+    <color name="field_blue">#030A4A</color>
+    <color name="hint_white">#B3FFFFFF</color>
+    <color name="glowing_yellow">#FFFFE0</color>
+</resources>

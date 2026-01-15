@@ -1,0 +1,49 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:orientation="vertical"
+    android:padding="16dp"
+    android:background="@drawable/item_card_yellow_border_dark_blue_bg"
+    android:elevation="4dp">
+
+<TextView
+android:id="@+id/tvDocumentType"
+android:layout_width="wrap_content"
+android:layout_height="wrap_content"
+android:text="@string/documentComingType"
+android:textSize="14sp"
+    android:textColor="@android:color/darker_gray"/>
+
+<TextView
+android:id="@+id/tvDocumentNumber"
+android:layout_width="wrap_content"
+android:layout_height="wrap_content"
+android:text="@string/documentNumber"
+    android:textColor="@color/white"
+android:textSize="22sp"
+    android:textStyle="bold"
+    android:layout_marginTop="6dp"/>
+
+<TextView
+android:id="@+id/tvArrivalDate"
+android:layout_width="wrap_content"
+android:layout_height="wrap_content"
+android:text="@string/arrivalDate"
+android:textSize="16sp"
+    android:textColor="@color/white"
+    android:layout_marginTop="4dp"/>
+
+<Button
+android:id="@+id/btnOpen"
+android:layout_width="wrap_content"
+android:layout_height="wrap_content"
+android:text="@string/btnOpenDocument"
+android:layout_gravity="end"
+android:layout_marginTop="12dp"
+    android:backgroundTint="@color/field_blue"
+    app:strokeColor="@color/yellow"
+    app:strokeWidth="2dp"
+    app:cornerRadius="1000dp"/>
+
+    </LinearLayout>
