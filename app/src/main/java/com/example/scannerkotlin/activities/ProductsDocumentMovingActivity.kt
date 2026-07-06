@@ -32,6 +32,7 @@ import com.example.scannerkotlin.request.ProductIdRequest
 import com.example.scannerkotlin.response.StoreAmountResponse
 import com.example.scannerkotlin.service.CatalogDocumentMovingService
 import com.example.scannerkotlin.utils.BaseScanActivity
+import com.example.scannerkotlin.utils.BarcodeScanGate
 import com.example.scannerkotlin.utils.MovingDocumentDraftManager
 import com.google.gson.internal.LinkedTreeMap
 import kotlinx.coroutines.Dispatchers
@@ -73,9 +74,14 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
 
 
     private var isSaved = false
+    private val scanGate = BarcodeScanGate(duplicateWindowMs = 500L)
 
     
     override fun onBarcodeScanned(barcode: String) {
+        if (!scanGate.tryAcquire(barcode)) {
+            Log.d("ProductsActivity", "Scan skipped by gate: $barcode")
+            return
+        }
         processBarcodeScan(barcode)
     }
 
@@ -578,6 +584,7 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
                 }
                 
             } 
+            scanGate.release()
         } 
     }
 

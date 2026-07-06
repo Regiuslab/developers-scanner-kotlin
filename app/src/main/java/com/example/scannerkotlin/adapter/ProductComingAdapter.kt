@@ -18,12 +18,14 @@ import java.util.Locale
 class ProductComingAdapter(
     private val productList: MutableList<Product>,
     private val onDelete: (position: Int) -> Unit,
+    private val onCopy: (position: Int) -> Unit,
     private var currentDocumentComment: String?,
     private val onCommentChanged: (String?) -> Unit
 ) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private var focusedPosition: Int = RecyclerView.NO_POSITION
-    private val measures = listOf("Штука", "Килограмм", "Литр", "Метр", "Грамм")
+    private val noMeasureValue = "Выберите ед."
+    private val measures = listOf(noMeasureValue, "Штука", "Килограмм", "Литр", "Метр", "Грамм")
 
     private var onDataChangedListener: (() -> Unit)? = null
 
@@ -187,6 +189,19 @@ class ProductComingAdapter(
         }
     }
 
+    fun updateProductBarcodeAt(position: Int, newBarcode: String): Boolean {
+        if (position < 0 || position >= productList.size) return false
+        val truncatedBarcode = if (newBarcode.length > 13) {
+            newBarcode.substring(0, 13)
+        } else {
+            newBarcode
+        }
+        productList[position].barcode = truncatedBarcode
+        notifyItemChanged(position, PAYLOAD_BARCODE_UPDATE)
+        onDataChangedListener?.invoke()
+        return true
+    }
+
 
 
     fun updateDocumentComment(newComment: String?) {
@@ -209,14 +224,18 @@ class ProductComingAdapter(
         val tvBarcode: EditText = itemView.findViewById(R.id.tvBarcode)
         val tvBarcodeError: TextView = itemView.findViewById(R.id.tvBarcodeError)
         val btnDelete: ImageButton = itemView.findViewById(R.id.btnDelete)
+        val btnCopy: ImageButton = itemView.findViewById(R.id.btnCopy)
         val etDiameter: EditText = itemView.findViewById(R.id.etDiameter)
         val etWeight: EditText = itemView.findViewById(R.id.etWeight)
         val etWallThickness: EditText = itemView.findViewById(R.id.etWallThickness)
+        val etBatchNumber: EditText = itemView.findViewById(R.id.etBatchNumber)
+        val cbOldProduct: CheckBox = itemView.findViewById(R.id.cbOldProduct)
 
         var quantityWatcher: TextWatcher? = null
         var diameterWatcher: TextWatcher? = null
         var weightWatcher: TextWatcher? = null
         var wallThicknessWatcher: TextWatcher? = null
+        var batchWatcher: TextWatcher? = null
 
         init {
             val measureAdapter = ArrayAdapter(
@@ -259,6 +278,11 @@ class ProductComingAdapter(
             etWallThickness.isFocusableInTouchMode = true
             etWallThickness.showSoftInputOnFocus = false
             etWallThickness.isCursorVisible = true
+
+            etBatchNumber.isFocusable = true
+            etBatchNumber.isFocusableInTouchMode = true
+            etBatchNumber.showSoftInputOnFocus = false
+            etBatchNumber.isCursorVisible = true
         }
 
 
@@ -303,6 +327,19 @@ class ProductComingAdapter(
             etDiameter.setText(product.diameter?.toString() ?: "")
             etWeight.setText(product.weight?.toString() ?: "")
             etWallThickness.setText(product.height?.toString() ?: "")
+            etBatchNumber.setText(product.batchNumber ?: "")
+            cbOldProduct.setOnCheckedChangeListener(null)
+            cbOldProduct.isChecked = product.isOldProduct
+            cbOldProduct.setOnCheckedChangeListener { _, isChecked ->
+                val currentPosition = adapterPosition
+                if (currentPosition != RecyclerView.NO_POSITION && currentPosition < productList.size) {
+                    val currentProduct = productList.getOrNull(currentPosition) ?: return@setOnCheckedChangeListener
+                    if (currentProduct.isOldProduct != isChecked) {
+                        currentProduct.isOldProduct = isChecked
+                        onDataChangedListener?.invoke()
+                    }
+                }
+            }
 
 
             if (quantityWatcher == null) {
@@ -354,10 +391,11 @@ class ProductComingAdapter(
                     val currentPosition = adapterPosition
                     if (currentPosition != RecyclerView.NO_POSITION && currentPosition < productList.size) {
                         val currentProduct = productList.getOrNull(currentPosition) ?: return
-                        if (currentProduct.measureName != selectedMeasure) {
-                            currentProduct.measureName = selectedMeasure
+                        val normalizedMeasure = if (selectedMeasure == noMeasureValue) null else selectedMeasure
+                        if (currentProduct.measureName != normalizedMeasure) {
+                            currentProduct.measureName = normalizedMeasure
                             Log.d("ViewHolder", "Measure changed to '$selectedMeasure' at pos $currentPosition for product ID ${currentProduct.id}")
-                            if (selectedMeasure == "Штука") {
+                            if (normalizedMeasure == "Штука") {
                                 currentProduct.quantity?.let { qty ->
                                     if (qty % 1.0 != 0.0) {
                                         currentProduct.quantity = qty.toInt().toDouble()
@@ -438,6 +476,26 @@ class ProductComingAdapter(
             }
             etWallThickness.addTextChangedListener(wallThicknessWatcher)
 
+            etBatchNumber.removeTextChangedListener(batchWatcher)
+            if (batchWatcher == null) {
+                batchWatcher = object : TextWatcher {
+                    override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+                    override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                        val currentPosition = adapterPosition
+                        if (currentPosition != RecyclerView.NO_POSITION && currentPosition < productList.size) {
+                            val currentProduct = productList.getOrNull(currentPosition) ?: return
+                            val newBatch = s?.toString()?.trim()
+                            if (currentProduct.batchNumber != newBatch) {
+                                currentProduct.batchNumber = newBatch
+                                onDataChangedListener?.invoke()
+                            }
+                        }
+                    }
+                    override fun afterTextChanged(s: Editable?) {}
+                }
+            }
+            etBatchNumber.addTextChangedListener(batchWatcher)
+
 
 
 
@@ -497,6 +555,13 @@ class ProductComingAdapter(
 
                 if (currentPosition != RecyclerView.NO_POSITION && currentPosition < productList.size) {
                     onDelete(currentPosition)
+                }
+            }
+
+            btnCopy.setOnClickListener {
+                val currentPosition = adapterPosition
+                if (currentPosition != RecyclerView.NO_POSITION && currentPosition < productList.size) {
+                    onCopy(currentPosition)
                 }
             }
         }

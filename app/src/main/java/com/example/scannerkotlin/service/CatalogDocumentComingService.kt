@@ -24,12 +24,10 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException 
 
 @RequiresApi(Build.VERSION_CODES.O) 
-class CatalogDocumentComingService {
-    private val baseUrl = "https://bitrix.izocom.by/rest/1/o2deu7wx7zfl3ib4/"
-    private val barcodeBaseUrl = "https://bitrix.izocom.by/rest/1/sh1lchx64vrzcor6/"
-
-    private var apiBitrix: ApiBitrix
-    private var apiBarcode: ApiBitrix
+class CatalogDocumentComingService(
+    private var apiBitrix: ApiBitrix = createApi(DEFAULT_BASE_URL),
+    private var apiBarcode: ApiBitrix = createApi(DEFAULT_BARCODE_BASE_URL)
+) {
     private val gson = Gson()
 
     
@@ -37,18 +35,17 @@ class CatalogDocumentComingService {
     private val documentElementsMapper = DocumentElementMapper()
     private val productMapper = ProductMapper()
 
-    init {
-        val retrofit: Retrofit = Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-        apiBitrix = retrofit.create(ApiBitrix::class.java)
+    companion object {
+        private const val DEFAULT_BASE_URL = "https://bitrix.izocom.by/rest/1/o2deu7wx7zfl3ib4/"
+        private const val DEFAULT_BARCODE_BASE_URL = "https://bitrix.izocom.by/rest/1/sh1lchx64vrzcor6/"
 
-        val barcodeRetrofit: Retrofit = Retrofit.Builder()
-            .baseUrl(barcodeBaseUrl)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-        apiBarcode = barcodeRetrofit.create(ApiBitrix::class.java)
+        private fun createApi(baseUrl: String): ApiBitrix {
+            val retrofit: Retrofit = Retrofit.Builder()
+                .baseUrl(baseUrl)
+                .addConverterFactory(GsonConverterFactory.create())
+                .build()
+            return retrofit.create(ApiBitrix::class.java)
+        }
     }
 
     
@@ -285,7 +282,11 @@ class CatalogDocumentComingService {
                     Log.d("ComingService", "Add step successful.")
 
                     updateDiameterAndWeightAndHeight(productOffersList)
-                    updateComment(documentComment, documentId = idDocument)
+                    updateComment(
+                        comment = documentComment,
+                        documentId = idDocument,
+                        products = currentProductListState
+                    )
 
                     val conductSuccess = conductDocSuspend(idDocument, context)
 
@@ -312,14 +313,28 @@ class CatalogDocumentComingService {
 
     }
 
-    private suspend fun updateComment(comment: String?, documentId: Int?) {
-        Log.d("CommentUpdate", "Function called. Document ID: $documentId, Received comment: '$comment'")
-        if (!comment.isNullOrBlank()) {
-            Log.d("CommentUpdate", "Attempting to update comment for document $documentId with: '$comment'")
+    private suspend fun updateComment(comment: String?, documentId: Int?, products: List<Product>) {
+        val batchSummary = products
+            .filter { it.isOldProduct || !it.batchNumber.isNullOrBlank() }
+            .joinToString("\n") { product ->
+                val batchValue = product.batchNumber ?: "-"
+                val oldFlag = if (product.isOldProduct) "Y" else "N"
+                val weight = product.weight?.toString() ?: "-"
+                "Партия:${product.name}|batch=$batchValue|old=$oldFlag|weight=$weight"
+            }
+
+        val finalComment = listOfNotNull(
+            comment?.takeIf { it.isNotBlank() },
+            batchSummary.takeIf { it.isNotBlank() }
+        ).joinToString("\n")
+
+        Log.d("CommentUpdate", "Function called. Document ID: $documentId, Received comment: '$finalComment'")
+        if (finalComment.isNotBlank()) {
+            Log.d("CommentUpdate", "Attempting to update comment for document $documentId with: '$finalComment'")
             val request = UpdateCommentRequest(
                 documentId = documentId,
                 fields = mutableMapOf(
-                    "field621" to comment,
+                    "field621" to finalComment,
                     "documentType" to "A"
                 )
             )
@@ -467,6 +482,14 @@ class CatalogDocumentComingService {
 
         for (productOffer in productOffersList) {
             try {
+                val existingOfferId = resolveOfferIdByBarcode(productOffer.barcode)
+                if (existingOfferId != null) {
+                    productOffer.id = existingOfferId
+                    successfullySaved.add(Pair(existingOfferId, productOffer))
+                    Log.d("ComingService", "Using existing offer $existingOfferId for barcode ${productOffer.barcode}")
+                    continue
+                }
+
                 // 1. Создаем вариацию (торговое предложение)
                 val productId = addVariationOfProductSuspend(productOffer)
                 if (productId == null) {
@@ -503,6 +526,22 @@ class CatalogDocumentComingService {
 
 
         ConductResult.SaveResult.Success(successfullySaved)
+    }
+
+    internal suspend fun saveProductVariationsForTest(
+        productOffersList: List<ProductOffer>
+    ): ConductResult.SaveResult = saveProductVariationsSuspend(productOffersList)
+
+    private suspend fun resolveOfferIdByBarcode(barcode: String?): Int? {
+        if (barcode.isNullOrBlank()) return null
+        return try {
+            val response = apiBarcode.getProductIdByBarcode(barcode)
+            if (!response.isSuccessful) return null
+            response.body()?.result?.trim()?.toIntOrNull()
+        } catch (e: Exception) {
+            Log.w("ComingService", "Failed to resolve offer by barcode: $barcode", e)
+            null
+        }
     }
 
     

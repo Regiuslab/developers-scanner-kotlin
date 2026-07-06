@@ -41,6 +41,12 @@ Android-приложение для складского сканировани�
 
 Требования: Android Studio, JDK 11, Android SDK.
 
+Если Gradle сообщает `SDK location not found`, создайте `local.properties` в корне проекта:
+
+```properties
+sdk.dir=/home/<username>/Android/Sdk
+```
+
 ```bash
 ./gradlew assembleDebug
 ```
@@ -50,6 +56,37 @@ Android-приложение для складского сканировани�
 ```bash
 ./gradlew installDebug
 ```
+
+## Тесты и пересборка
+
+Юнит-тесты:
+
+```bash
+./gradlew testDebugUnitTest
+```
+
+Инструментальные тесты (устройство/эмулятор должен быть запущен):
+
+```bash
+./gradlew connectedAndroidTest
+```
+
+Полная пересборка (очистка + debug):
+
+```bash
+./gradlew clean assembleDebug
+```
+
+Сборка релизного APK:
+
+```bash
+./gradlew assembleRelease
+```
+
+Готовые APK:
+
+- debug: `app/build/outputs/apk/debug/app-debug.apk`
+- release: `app/build/outputs/apk/release/app-release.apk`
 
 ## Конфигурация Bitrix REST
 

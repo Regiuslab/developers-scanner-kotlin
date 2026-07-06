@@ -26,7 +26,10 @@ import com.example.scannerkotlin.model.Product
 import com.example.scannerkotlin.model.ProductOffer
 import com.example.scannerkotlin.response.ConductResult
 import com.example.scannerkotlin.service.CatalogDocumentComingService
+import com.example.scannerkotlin.utils.ComingMeasureAutoResolver
+import com.example.scannerkotlin.utils.ComingProductCopyFactory
 import com.example.scannerkotlin.utils.BaseScanActivity
+import com.example.scannerkotlin.utils.ComingProductValidator
 import com.example.scannerkotlin.utils.ComingDocumentDraftManager
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import kotlinx.coroutines.Dispatchers
@@ -160,6 +163,9 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
             onDelete = { position ->
                 handleItemDeletion(position)
             },
+            onCopy = { position ->
+                handleItemCopy(position)
+            },
             currentDocumentComment = this.currentDocumentComment,
             onCommentChanged = { newComment ->
                 this.currentDocumentComment = newComment
@@ -238,6 +244,7 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
             Toast.makeText(this, "Вы выбрали: ${selectedProduct.name}", Toast.LENGTH_SHORT).show()
             val listWasEmpty = productList.isEmpty()
 
+            selectedProduct.measureName = ComingMeasureAutoResolver.resolve(selectedProduct)
 
             if (selectedProduct.quantity == null || selectedProduct.quantity == 0.0) {
                 selectedProduct.quantity = 1.0
@@ -296,6 +303,19 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
         }
 
         adapter.notifyDataSetChanged()
+        updateSaveButtonState()
+        updateEmptyStateVisibility()
+    }
+
+    private fun handleItemCopy(position: Int) {
+        if (position < 0 || position >= productList.size) return
+        val source = productList[position]
+        val clone = ComingProductCopyFactory.cloneWithoutValues(source)
+        val insertPosition = (position + 1).coerceAtMost(productList.size)
+        productList.add(insertPosition, clone)
+        productOffersList.add(insertPosition, createProductOffer(clone))
+        adapter.notifyItemInserted(insertPosition)
+        recyclerView.scrollToPosition(insertPosition)
         updateSaveButtonState()
         updateEmptyStateVisibility()
     }
@@ -402,8 +422,31 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
             updateSaveButtonState()
         } else {
             Log.w("ProductsComingActivity", "Failed to update barcode in adapter (no focused product?).")
-            Toast.makeText(this, "Сначала выберите поле Штрихкод у товара", Toast.LENGTH_LONG).show()
+            if (productList.isNotEmpty()) {
+                showManualBarcodeTargetDialog(barcode)
+            } else {
+                Toast.makeText(this, "Сначала добавьте товар в документ", Toast.LENGTH_LONG).show()
+            }
         }
+    }
+
+    private fun showManualBarcodeTargetDialog(barcode: String) {
+        val productTitles = productList.mapIndexed { index, product ->
+            "${index + 1}. ${product.name ?: "Без названия"}"
+        }.toTypedArray()
+
+        MaterialAlertDialogBuilder(this, R.style.MyCustomMaterialAlertDialogStyle)
+            .setTitle("Выберите товар для штрихкода")
+            .setItems(productTitles) { dialog, which ->
+                val set = adapter.updateProductBarcodeAt(which, barcode)
+                if (set) {
+                    updateSaveButtonState()
+                    Toast.makeText(this, "Штрихкод '$barcode' установлен вручную", Toast.LENGTH_SHORT).show()
+                }
+                dialog.dismiss()
+            }
+            .setNegativeButton("Отмена") { dialog, _ -> dialog.dismiss() }
+            .show()
     }
 
 
@@ -480,25 +523,13 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
     }
 
     private fun validateProductsAndCollectErrors(): List<String> {
-        val errors = mutableListOf<String>()
-        if (productList.isEmpty()) {
-            errors.add("Добавьте хотя бы один товар в документ")
-            return errors
-        }
-
-        val missingBarcodeProducts = adapter.findProductsMissingBarcodes()
-        if (missingBarcodeProducts.isNotEmpty()) {
-            missingBarcodeProducts.forEachIndexed { index, product ->
-                val line = "• Товар: ${product.name ?: "Без названия"} (ID: ${product.id ?: "?"}) — не заполнен штрихкод"
-                errors.add(line)
-            }
-            // scroll to first missing
+        val errors = ComingProductValidator.validate(productList)
+        if (errors.isNotEmpty()) {
             val pos = adapter.findFirstMissingBarcodePosition()
             if (pos >= 0) {
                 recyclerView.scrollToPosition(pos)
             }
         }
-
         return errors
     }
 

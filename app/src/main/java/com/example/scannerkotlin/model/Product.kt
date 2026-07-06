@@ -43,7 +43,11 @@ data class Product(
     @JsonAdapter(ParentIdValueDeserializer::class)
     var parentId: Int?,
 
-    var storeAmount: List<StoreAmountResponse.StoreProduct>?
+    var storeAmount: List<StoreAmountResponse.StoreProduct>?,
+
+    var batchNumber: String? = null,
+
+    var isOldProduct: Boolean = false
 ){
 
     var measureName: String?
@@ -80,7 +84,9 @@ data class Product(
         weight = 0.0,
         height = 0.0,
         parentId = null,
-        storeAmount = null
+        storeAmount = null,
+        batchNumber = null,
+        isOldProduct = false
     )
 
     fun checkInList(products: List<Product>): Boolean {
@@ -89,6 +95,6 @@ data class Product(
     }
 
     override fun toString(): String {
-        return "Product(idInDocument=$idInDocument, id=$id, iblockId=$iblockId, name=$name, measureId=$measureId, measureSymbol=$measureSymbol, measureName=$measureName, quantity=$quantity, barcode=$barcode, diameter=$diameter, weight=$weight, height=$height, parentId=$parentId)"
+        return "Product(idInDocument=$idInDocument, id=$id, iblockId=$iblockId, name=$name, measureId=$measureId, measureSymbol=$measureSymbol, measureName=$measureName, quantity=$quantity, barcode=$barcode, diameter=$diameter, weight=$weight, height=$height, parentId=$parentId, batchNumber=$batchNumber, isOldProduct=$isOldProduct)"
     }
 }
