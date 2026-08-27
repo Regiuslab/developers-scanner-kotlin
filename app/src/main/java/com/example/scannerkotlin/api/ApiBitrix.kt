@@ -49,9 +49,9 @@ interface ApiBitrix {
         @Body request: ProductIdRequest
     ): Response<ProductResponse>
 
-    @GET("catalog.document.conduct")
+    @POST("catalog.document.conduct")
     suspend fun conductDocument(
-        @Query("id") id: Int
+        @Body request: ConductDocumentRequest
     ) : Response<HashMap<String, Any?>>
 
     @POST("catalog.document.element.update")

@@ -20,7 +20,7 @@ class ProductToDocumentElementMapper {
             storeFrom = storeFrom,
             storeTo = storeTo,
             name = product.name,
-            mainAmount = product.quantity?.toDouble()
+            mainAmount = null
         )
     }
 

@@ -1,0 +1,194 @@
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -33,6 +33,9 @@
+     kotlinOptions {
+         jvmTarget = "11"
+     }
++    testOptions {
++        unitTests.isReturnDefaultValues = true
++    }
+ }
+ 
+ dependencies {
+--- a/app/src/test/java/com/example/scannerkotlin/service/CatalogDocumentComingServiceTest.kt
++++ b/app/src/test/java/com/example/scannerkotlin/service/CatalogDocumentComingServiceTest.kt
+@@ -9,81 +9,94 @@
+ import com.example.scannerkotlin.response.ConductResult
+ import com.example.scannerkotlin.response.ProductBarcodeResponse
+ import com.example.scannerkotlin.response.ProductOfferResponse
++import com.google.gson.internal.LinkedTreeMap
+ import kotlinx.coroutines.runBlocking
+ import org.junit.Assert.assertEquals
+ import org.junit.Assert.assertTrue
+ import org.junit.Test
+-import org.mockito.ArgumentMatchers.any
+-import org.mockito.ArgumentMatchers.anyString
+ import org.mockito.Mockito
+ import retrofit2.Response
+ 
+ class CatalogDocumentComingServiceTest {
+ 
+     @Test
+-    fun `reuses existing offer when barcode already mapped`() = runBlocking {
+-        val apiBitrix = Mockito.mock(ApiBitrix::class.java)
+-        val apiBarcode = Mockito.mock(ApiBitrix::class.java)
+-        Mockito.`when`(apiBarcode.getProductIdByBarcode(anyString()))
+-            .thenReturn(Response.success(ProductBarcodeResponse("432")))
+-
+-        val service = CatalogDocumentComingService(apiBitrix = apiBitrix, apiBarcode = apiBarcode)
+-        val result = service.saveProductVariationsForTest(listOf(productOffer(barcode = "1234567890123")))
+-
+-        assertTrue(result is ConductResult.SaveResult.Success)
+-        val success = result as ConductResult.SaveResult.Success
+-        assertEquals(1, success.savedVariations.size)
+-        assertEquals(432, success.savedVariations.first().first)
+-        Mockito.verify(apiBitrix, Mockito.never()).addVariationsOfProduct(any(ProductOfferRequest::class.java))
+-        Mockito.verify(apiBarcode, Mockito.never()).setBarcodeByProductId(any(BarcodeRequest::class.java))
+-        Mockito.verify(apiBarcode, Mockito.never())
+-            .setBarcodeByProductId(any(BarcodeRequest::class.java))
+-        Unit
++    fun `reuses existing offer when barcode already mapped`() {
++        runBlocking {
++            val barcode = "1234567890123"
++            val apiBitrix = Mockito.mock(ApiBitrix::class.java)
++            val apiBarcode = Mockito.mock(ApiBitrix::class.java)
++            Mockito.`when`(apiBarcode.getProductIdByBarcode(barcode))
++                .thenReturn(Response.success(ProductBarcodeResponse("432")))
++
++            val service = CatalogDocumentComingService(apiBitrix = apiBitrix, apiBarcode = apiBarcode)
++            val result = service.saveProductVariationsForTest(listOf(productOffer(barcode)))
++
++            assertTrue(result is ConductResult.SaveResult.Success)
++            val success = result as ConductResult.SaveResult.Success
++            assertEquals(1, success.savedVariations.size)
++            assertEquals(432, success.savedVariations.first().first)
++            Mockito.verify(apiBarcode).getProductIdByBarcode(barcode)
++            Mockito.verifyNoInteractions(apiBitrix)
++            Mockito.verifyNoMoreInteractions(apiBarcode)
++        }
+     }
+ 
+     @Test
+-    fun `creates offer and sets barcode when no existing barcode mapping`() = runBlocking {
+-        val apiBitrix = Mockito.mock(ApiBitrix::class.java)
+-        val apiBarcode = Mockito.mock(ApiBitrix::class.java)
+-
+-        Mockito.`when`(apiBarcode.getProductIdByBarcode(anyString()))
+-            .thenReturn(Response.success(ProductBarcodeResponse(" ")))
+-        Mockito.`when`(apiBitrix.addVariationsOfProduct(any(ProductOfferRequest::class.java)))
+-            .thenReturn(Response.success(productOfferResponse(id = 777)))
+-        Mockito.`when`(apiBarcode.setBarcodeByProductId(any(BarcodeRequest::class.java)))
+-            .thenReturn(Response.success(BarcodeResponse(true)))
+-
+-        val service = CatalogDocumentComingService(apiBitrix = apiBitrix, apiBarcode = apiBarcode)
+-        val result = service.saveProductVariationsForTest(listOf(productOffer(barcode = "1234567890123")))
+-
+-        assertTrue(result is ConductResult.SaveResult.Success)
+-        val success = result as ConductResult.SaveResult.Success
+-        assertEquals(777, success.savedVariations.first().first)
+-        Mockito.verify(apiBitrix).addVariationsOfProduct(any(ProductOfferRequest::class.java))
+-        Mockito.verify(apiBarcode).setBarcodeByProductId(any(BarcodeRequest::class.java))
+-        Mockito.verify(apiBarcode)
+-            .setBarcodeByProductId(any(BarcodeRequest::class.java))
+-        Unit
++    fun `creates offer and sets barcode when no existing barcode mapping`() {
++        runBlocking {
++            val barcode = "1234567890123"
++            val offer = productOffer(barcode)
++            val addRequest = productOfferRequest(offer)
++            val barcodeRequest = BarcodeRequest(777, barcode)
++            val apiBitrix = Mockito.mock(ApiBitrix::class.java)
++            val apiBarcode = Mockito.mock(ApiBitrix::class.java)
++
++            Mockito.`when`(apiBarcode.getProductIdByBarcode(barcode))
++                .thenReturn(Response.success(ProductBarcodeResponse(" ")))
++            Mockito.`when`(apiBitrix.addVariationsOfProduct(addRequest))
++                .thenReturn(Response.success(productOfferResponse(id = 777)))
++            Mockito.`when`(apiBarcode.setBarcodeByProductId(barcodeRequest))
++                .thenReturn(Response.success(BarcodeResponse(true)))
++
++            val service = CatalogDocumentComingService(apiBitrix = apiBitrix, apiBarcode = apiBarcode)
++            val result = service.saveProductVariationsForTest(listOf(offer))
++
++            assertTrue(result is ConductResult.SaveResult.Success)
++            val success = result as ConductResult.SaveResult.Success
++            assertEquals(777, success.savedVariations.first().first)
++            Mockito.verify(apiBitrix).addVariationsOfProduct(addRequest)
++            Mockito.verify(apiBarcode).getProductIdByBarcode(barcode)
++            Mockito.verify(apiBarcode).setBarcodeByProductId(barcodeRequest)
++        }
+     }
+ 
+     @Test
+-    fun `returns failure when barcode assignment fails`() = runBlocking {
+-        val apiBitrix = Mockito.mock(ApiBitrix::class.java)
+-        val apiBarcode = Mockito.mock(ApiBitrix::class.java)
+-
+-        Mockito.`when`(apiBarcode.getProductIdByBarcode(anyString()))
+-            .thenReturn(Response.success(ProductBarcodeResponse("")))
+-        Mockito.`when`(apiBitrix.addVariationsOfProduct(any(ProductOfferRequest::class.java)))
+-            .thenReturn(Response.success(productOfferResponse(id = 991)))
+-        Mockito.`when`(apiBarcode.setBarcodeByProductId(any(BarcodeRequest::class.java)))
+-            .thenReturn(Response.success(BarcodeResponse(false)))
+-
+-        val service = CatalogDocumentComingService(apiBitrix = apiBitrix, apiBarcode = apiBarcode)
+-        val result = service.saveProductVariationsForTest(listOf(productOffer(barcode = "1234567890123")))
+-
+-        assertTrue(result is ConductResult.SaveResult.Failure)
+-        val failure = result as ConductResult.SaveResult.Failure
+-        assertTrue(failure.errorMessage.contains("уже используется"))
++    fun `returns failure when barcode assignment fails`() {
++        runBlocking {
++            val barcode = "1234567890123"
++            val offer = productOffer(barcode)
++            val addRequest = productOfferRequest(offer)
++            val barcodeRequest = BarcodeRequest(991, barcode)
++            val apiBitrix = Mockito.mock(ApiBitrix::class.java)
++            val apiBarcode = Mockito.mock(ApiBitrix::class.java)
++
++            Mockito.`when`(apiBarcode.getProductIdByBarcode(barcode))
++                .thenReturn(Response.success(ProductBarcodeResponse("")))
++            Mockito.`when`(apiBitrix.addVariationsOfProduct(addRequest))
++                .thenReturn(Response.success(productOfferResponse(id = 991)))
++            Mockito.`when`(apiBarcode.setBarcodeByProductId(barcodeRequest))
++                .thenReturn(Response.success(BarcodeResponse(false)))
++
++            val service = CatalogDocumentComingService(apiBitrix = apiBitrix, apiBarcode = apiBarcode)
++            val result = service.saveProductVariationsForTest(listOf(offer))
++
++            assertTrue(result is ConductResult.SaveResult.Failure)
++            val failure = result as ConductResult.SaveResult.Failure
++            assertTrue(failure.errorMessage.contains("уже используется"))
++            Mockito.verify(apiBitrix).addVariationsOfProduct(addRequest)
++            Mockito.verify(apiBarcode).getProductIdByBarcode(barcode)
++            Mockito.verify(apiBarcode).setBarcodeByProductId(barcodeRequest)
++        }
+     }
+ 
+     private fun productOffer(barcode: String?): ProductOffer {
+@@ -106,8 +119,24 @@
+     }
+ 
+     private fun productOfferResponse(id: Int): ProductOfferResponse {
+-        val offerMap = hashMapOf<String, Any>("id" to id.toDouble())
++        val offerMap = LinkedTreeMap<String, Any>().apply {
++            put("id", id.toDouble())
++        }
+         val resultMap = hashMapOf<String, Any>("offer" to offerMap)
+         return ProductOfferResponse(result = resultMap)
+     }
++
++    private fun productOfferRequest(offer: ProductOffer): ProductOfferRequest {
++        return ProductOfferRequest(
++            fields = mutableMapOf(
++                "iblockId" to 15,
++                "name" to requireNotNull(offer.name),
++                "measure" to requireNotNull(offer.measure),
++                "parentId" to offer.parentId,
++                "dateCreate" to offer.dateCreate.toString(),
++                "purchasingPrice" to offer.purchasingPrice,
++                "purchasingCurrency" to requireNotNull(offer.purchasingCurrency)
++            )
++        )
++    }
+ }

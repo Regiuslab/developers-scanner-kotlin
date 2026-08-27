@@ -22,6 +22,7 @@ import com.example.scannerkotlin.R
 import com.example.scannerkotlin.model.DocumentElement
 import com.example.scannerkotlin.model.Store
 import com.example.scannerkotlin.service.CatalogDocumentMovingService
+import com.example.scannerkotlin.utils.MovingAvailabilityDisplay
 import kotlinx.coroutines.*
 
 class ProductMovingAdapter(
@@ -175,15 +176,31 @@ class ProductMovingAdapter(
             }
 
 
-            if (document.mainAmount != null) {
-                availableQuantity.text = "Доступно: ${document.mainAmount}"
+            if (storeList.isEmpty()) {
+                availableQuantity.text = MovingAvailabilityDisplay.availableLabel(
+                    storesLoaded = false,
+                    mainAmount = document.mainAmount,
+                    storeFrom = document.storeFrom
+                )
+            } else if (document.mainAmount != null) {
+                availableQuantity.text = MovingAvailabilityDisplay.availableLabel(
+                    storesLoaded = true,
+                    mainAmount = document.mainAmount,
+                    storeFrom = document.storeFrom
+                )
+            } else if (document.storeFrom != null) {
+                availableQuantity.text = MovingAvailabilityDisplay.availableLabel(
+                    storesLoaded = true,
+                    mainAmount = null,
+                    storeFrom = document.storeFrom
+                )
+                loadAvailableAmount(document, this)
             } else {
-                if (document.storeFrom != null) {
-                    availableQuantity.text = "Доступно: Загрузка..."
-                    loadAvailableAmount(document, this)
-                } else {
-                    availableQuantity.text = "Доступно: Выберите склад"
-                }
+                availableQuantity.text = MovingAvailabilityDisplay.availableLabel(
+                    storesLoaded = true,
+                    mainAmount = null,
+                    storeFrom = null
+                )
             }
 
 
@@ -265,7 +282,7 @@ class ProductMovingAdapter(
                 if (currentPosition != RecyclerView.NO_POSITION && currentPosition < documentList.size) {
                     val currentDocument = documentList[currentPosition]
                                          val availableAmount = currentDocument.mainAmount
-                     if (availableAmount != null && availableAmount > 0) {
+                     if (storeList.isNotEmpty() && availableAmount != null && availableAmount > 0) {
                          val amountStr = availableAmount.toString()
                          etQuantity.setText(amountStr)
                          currentDocument.amount = availableAmount

@@ -5,7 +5,7 @@
     android:layout_height="match_parent"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:background="@color/dark_blue"
-    android:padding="16dp">
+    android:padding="8dp">
 
 
     <LinearLayout
@@ -62,8 +62,8 @@
         android:layout_height="match_parent"
         android:layout_below="@id/topSection"
         android:layout_above="@id/buttonContainer"
-        android:layout_marginTop="16dp"
-        android:layout_marginBottom="16dp"/>
+        android:layout_marginTop="8dp"
+        android:layout_marginBottom="8dp"/>
 
 
     <ProgressBar

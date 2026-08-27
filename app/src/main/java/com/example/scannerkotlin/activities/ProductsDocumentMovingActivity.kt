@@ -33,7 +33,10 @@ import com.example.scannerkotlin.response.StoreAmountResponse
 import com.example.scannerkotlin.service.CatalogDocumentMovingService
 import com.example.scannerkotlin.utils.BaseScanActivity
 import com.example.scannerkotlin.utils.BarcodeScanGate
+import com.example.scannerkotlin.utils.MovingAvailabilityDisplay
+import com.example.scannerkotlin.utils.MovingConductRetrySync
 import com.example.scannerkotlin.utils.MovingDocumentDraftManager
+import com.example.scannerkotlin.utils.MovingDocumentStateMerger
 import com.google.gson.internal.LinkedTreeMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -74,6 +77,7 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
 
 
     private var isSaved = false
+    private var isConducting = false
     private val scanGate = BarcodeScanGate(duplicateWindowMs = 500L)
 
     
@@ -154,42 +158,47 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
                 }
                 Log.d("ProductsActivity", "Loaded ${loadedStores.size} stores and ${serverElements.size} elements from server.")
             } catch (e: Exception) {
-                Log.d("ProductsActivity", "Error")
+                Log.e("ProductsActivity", "Error during initial data loading", e)
+                error = e
             } finally {
                 withContext(Dispatchers.Main) {
                     progressBar.visibility = View.GONE
                     if (isActive) {
-                        if (error == null) {
+                        if (loadedStores.isNotEmpty()) {
                             storeList = loadedStores
+                            adapter.updateStores(storeList)
+                        }
 
+                        if (error == null) {
                             baseList.clear()
                             baseList.addAll(serverElements)
 
+                            val merged = MovingDocumentStateMerger.merge(
+                                serverElements = serverElements,
+                                draftElements = draftElements,
+                                localDuringLoad = ArrayList(elements)
+                            )
                             elements.clear()
-                            if (draftElements != null) {
+                            elements.addAll(merged.elements)
+                            newProductInDocument.clear()
+                            newProductInDocument.addAll(merged.newProducts)
+                            deletedProduct.clear()
+                            deletedProduct.addAll(merged.deletedProducts)
 
-                                Log.d("ProductsActivity", "Applying draft with ${draftElements.size} elements.")
-                                elements.addAll(draftElements)
-
-                                val baseIds = baseList.map { it.id }.toSet()
-                                newProductInDocument.clear()
-                                newProductInDocument.addAll(elements.filter { it.id == null })
-                                deletedProduct.clear()
-                                deletedProduct.addAll(baseList.filter { baseEl -> elements.none { it.id == baseEl.id } })
-                            } else {
-
-                                Log.d("ProductsActivity", "No draft found. Applying server data.")
-                                elements.addAll(serverElements)
-                                newProductInDocument.clear()
-                                deletedProduct.clear()
-                            }
-
-                            adapter.updateStores(storeList)
                             adapter.updateData(ArrayList(elements))
                             updateEmptyStateVisibility()
                             updateSaveButtonState()
+                            if (storeList.isEmpty()) {
+                                showAlertInfo(MovingAvailabilityDisplay.STORES_NOT_LOADED_ALERT)
+                            }
                         } else {
-                            Log.d("ProductsActivity", "Error")
+                            Toast.makeText(
+                                this@ProductsDocumentMovingActivity,
+                                "Ошибка загрузки данных: ${error.message}",
+                                Toast.LENGTH_LONG
+                            ).show()
+                            updateEmptyStateVisibility()
+                            updateSaveButtonState()
                         }
                     }
                 }
@@ -402,14 +411,39 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
 
     private fun handleSaveButtonClick() {
         val currentIdDocument = idDocument ?: return
+        if (isConducting) {
+            Log.d("ProductsActivity", "Conduct ignored: already in progress")
+            return
+        }
+        if (storeList.isEmpty()) {
+            lifecycleScope.launch {
+                progressBar.visibility = View.VISIBLE
+                val stores = withContext(Dispatchers.IO) { service.getStoreList() }
+                progressBar.visibility = View.GONE
+                if (stores.isNotEmpty()) {
+                    storeList = stores
+                    adapter.updateStores(storeList)
+                    updateSaveButtonState()
+                    handleSaveButtonClick()
+                } else {
+                    showAlertInfo(MovingAvailabilityDisplay.STORES_NOT_LOADED_ALERT)
+                }
+            }
+            return
+        }
         if (!areAllFieldsFilled(elements)) {
             Toast.makeText(this, "Заполните все поля (Кол-во > 0, Склад Откуда/Куда, Склады не равны)", Toast.LENGTH_LONG).show()
             return
         }
 
+        startConduct(currentIdDocument)
+    }
+
+    private fun startConduct(currentIdDocument: Int) {
         Log.d("ProductsActivity", "Save button clicked for document $currentIdDocument")
+        isConducting = true
         progressBar.visibility = View.VISIBLE
-        btnSave.isEnabled = false 
+        btnSave.isEnabled = false
 
         
         val productsActuallyUpdated = elements.filter { current ->
@@ -456,8 +490,11 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
                     }
                 } else {
                     withContext(Dispatchers.Main) {
+                        MovingConductRetrySync.promotePersistedAdds(newProductInDocument, baseList)
+                        isConducting = false
                         progressBar.visibility = View.GONE
                         btnSave.isEnabled = true
+                        updateSaveButtonState()
                         if (isActive) {
                             if (error != null) {
                                 Toast.makeText(this@ProductsDocumentMovingActivity, "Ошибка проведения: ${error.message}", Toast.LENGTH_LONG).show()
@@ -473,7 +510,11 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
 
     
     private fun processBarcodeScan(barcode: String) {
-        val currentIdDocument = idDocumentLong ?: return 
+        val currentIdDocument = idDocumentLong
+        if (currentIdDocument == null) {
+            scanGate.release()
+            return
+        }
 
         progressBar.visibility = View.VISIBLE
         Log.d("ProductsActivity", "Processing barcode: $barcode for document $currentIdDocument")
@@ -484,8 +525,18 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
             var failureMessage: String? = null
 
             try {
-                
-                val productId = withContext(Dispatchers.IO) {
+                if (storeList.isEmpty()) {
+                    val stores = withContext(Dispatchers.IO) { service.getStoreList() }
+                    if (stores.isNotEmpty()) {
+                        storeList = stores
+                        adapter.updateStores(storeList)
+                    }
+                }
+                if (storeList.isEmpty()) {
+                    failureMessage = MovingAvailabilityDisplay.STORES_NOT_LOADED_ALERT
+                }
+
+                val productId = if (failureMessage == null) withContext(Dispatchers.IO) {
                     Log.d("ProductsActivity", "[IO] Getting product ID for barcode $barcode")
                     val response = apiBitrix.getProductIdByBarcode(barcode) 
 
@@ -510,7 +561,7 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
                         failureMessage = "Ошибка при поиске штрихкода (${response.code()})."
                         null 
                     }
-                } 
+                } else null
 
                 
                 if (productId != null) {
@@ -626,7 +677,8 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
                 } else {
                     append("Остатки на складах:\n")
                     storeAmounts.forEach { storeProduct ->
-                        val storeName = storeList.find { it.id == storeProduct.storeId.toInt() }?.title ?: "Склад ID ${storeProduct.storeId}"
+                        val storeId = storeProduct.storeId.toInt()
+                        val storeName = storeList.find { it.id == storeId }?.title ?: "Склад ID $storeId"
                         append("$storeName: ${storeProduct.amount}\n")
                     }
                 }
@@ -732,9 +784,10 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
     }
 
     private fun updateSaveButtonStateInternal() {
-        val canSave = areAllFieldsFilled(elements)
-        Log.d("ProductsActivity", "Updating save button state. CanSave: $canSave")
-        btnSave.isEnabled = canSave
+        val storesMissing = storeList.isEmpty() && elements.isNotEmpty()
+        val canSave = !storesMissing && areAllFieldsFilled(elements)
+        Log.d("ProductsActivity", "Updating save button state. CanSave: $canSave storesMissing: $storesMissing")
+        btnSave.isEnabled = canSave || storesMissing
         btnSave.setBackgroundColor(
             ContextCompat.getColor(
                 this,

@@ -1,7 +1,6 @@
 package com.example.scannerkotlin.activities
 
 import android.annotation.SuppressLint
-import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -18,13 +17,14 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.scannerkotlin.R
 import com.example.scannerkotlin.adapter.DocumentMovingAdapter
 import com.example.scannerkotlin.decoration.SpaceItemDecoration
-import com.example.scannerkotlin.listener.OnItemClickListener
 import com.example.scannerkotlin.model.Document
 import com.example.scannerkotlin.service.CatalogDocumentMovingService
+import com.example.scannerkotlin.utils.InFlightGuard
 import com.example.scannerkotlin.utils.SessionManager
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -41,6 +41,7 @@ class DocumentMovingActivity : AppCompatActivity() {
     private lateinit var emptyListMovingTextView: TextView
 
     private var loadDocumentsJob: Job? = null
+    private val createDocumentGuard = InFlightGuard(minDurationMs = 1_000L)
 
     @SuppressLint("MissingInflatedId")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -80,11 +81,16 @@ class DocumentMovingActivity : AppCompatActivity() {
 
     private fun setupAddButtonListener() {
         btnAddDocument.setOnClickListener {
+            if (!createDocumentGuard.tryAcquire()) {
+                Log.d("DocumentMovingActivity", "Add ignored: document creation already in progress")
+                return@setOnClickListener
+            }
             try {
                 val userId = SessionManager.requireUserId()
                 Log.d("DocumentMovingActivity", "Add button clicked, userId: $userId")
                 addNewDocument(userId)
             } catch (e: IllegalStateException) {
+                createDocumentGuard.release()
                 Log.e("DocumentMovingActivity", "Failed to get userId, user might not be logged in.", e)
                 Toast.makeText(this, "Ошибка сессии. Пожалуйста, перезайдите.", Toast.LENGTH_LONG).show()
                 finish()
@@ -93,36 +99,42 @@ class DocumentMovingActivity : AppCompatActivity() {
     }
 
     private fun addNewDocument(userId: String) {
+        setAddButtonEnabled(false)
         lifecycleScope.launch {
             progressBar.visibility = View.VISIBLE
-
             recyclerView.visibility = View.GONE
             emptyListMovingTextView.visibility = View.GONE
-            var success = false
             try {
                 Log.d("DocumentMovingActivity", "Calling addNewDocument suspend function with userId: $userId")
-                success = service.addNewDocument(userId)
+                val success = service.addNewDocument(userId)
                 Log.d("DocumentMovingActivity", "addNewDocument returned: $success")
 
                 if (success) {
                     Toast.makeText(this@DocumentMovingActivity, "Документ успешно добавлен", Toast.LENGTH_SHORT).show()
-                    loadDocuments()
                 } else {
                     Toast.makeText(this@DocumentMovingActivity, "Не удалось добавить документ (ответ сервера)", Toast.LENGTH_SHORT).show()
-                    progressBar.visibility = View.GONE
-
-                     loadDocuments()
-                     if (adapter.itemCount > 0) recyclerView.visibility = View.VISIBLE else emptyListMovingTextView.visibility = View.VISIBLE
                 }
+                loadDocumentsJob?.cancel()
+                refreshDocumentList()
             } catch (e: Exception) {
                 Log.e("DocumentMovingActivity", "Error calling addNewDocument", e)
                 Toast.makeText(this@DocumentMovingActivity, "Ошибка сети или сервера при добавлении", Toast.LENGTH_SHORT).show()
                 progressBar.visibility = View.GONE
-
-                 if (adapter.itemCount > 0) recyclerView.visibility = View.VISIBLE else emptyListMovingTextView.visibility = View.VISIBLE
+                if (adapter.itemCount > 0) recyclerView.visibility = View.VISIBLE else emptyListMovingTextView.visibility = View.VISIBLE
+            } finally {
+                val remainingLock = createDocumentGuard.remainingLockMs()
+                if (remainingLock > 0) {
+                    delay(remainingLock)
+                }
+                createDocumentGuard.release()
+                setAddButtonEnabled(true)
             }
-
         }
+    }
+
+    private fun setAddButtonEnabled(enabled: Boolean) {
+        btnAddDocument.isEnabled = enabled
+        btnAddDocument.isClickable = enabled
     }
 
 
@@ -131,66 +143,68 @@ class DocumentMovingActivity : AppCompatActivity() {
         loadDocumentsJob?.cancel()
 
         Log.d("DocumentMovingActivity", "loadDocuments called")
+        loadDocumentsJob = lifecycleScope.launch {
+            refreshDocumentList()
+        }
+    }
+
+    private suspend fun refreshDocumentList() {
         progressBar.visibility = View.VISIBLE
         recyclerView.visibility = View.GONE
         emptyListMovingTextView.visibility = View.GONE
 
-        loadDocumentsJob = lifecycleScope.launch {
-            var documents: List<Document> = emptyList()
-            var error: Exception? = null
+        var documents: List<Document> = emptyList()
+        var error: Exception? = null
 
-            try {
-                Log.d("DocumentMovingActivity", "Calling getDocumentsSuspend...")
+        try {
+            Log.d("DocumentMovingActivity", "Calling getDocumentsSuspend...")
 
-                documents = withContext(Dispatchers.IO) {
-                    service.getDocumentsSuspend()
-                }
-                Log.d("DocumentMovingActivity", "getDocumentsSuspend returned ${documents.size} documents")
-            } catch (e: Exception) {
-                Log.e("DocumentMovingActivity", "Error loading documents", e)
-                error = e
-            } finally {
+            documents = withContext(Dispatchers.IO) {
+                service.getDocumentsSuspend()
+            }
+            Log.d("DocumentMovingActivity", "getDocumentsSuspend returned ${documents.size} documents")
+        } catch (e: Exception) {
+            Log.e("DocumentMovingActivity", "Error loading documents", e)
+            error = e
+        } finally {
 
-                withContext(Dispatchers.Main) {
-                    progressBar.visibility = View.GONE
-                    if (isActive) {
-                        if (error != null) {
+            withContext(Dispatchers.Main) {
+                progressBar.visibility = View.GONE
+                if (isActive) {
+                    if (error != null) {
 
-                            Toast.makeText(
-                                this@DocumentMovingActivity,
-                                "Ошибка загрузки документов: ${error.message}",
-                                Toast.LENGTH_LONG
-                            ).show()
-                            emptyListMovingTextView.text = "Ошибка загрузки"
+                        Toast.makeText(
+                            this@DocumentMovingActivity,
+                            "Ошибка загрузки документов: ${error.message}",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        emptyListMovingTextView.text = "Ошибка загрузки"
+                        emptyListMovingTextView.visibility = View.VISIBLE
+                        recyclerView.visibility = View.GONE
+                        adapter.updateData(emptyList())
+                    } else {
+
+                        if (documents.isEmpty()) {
+
+                            Log.d("DocumentMovingActivity", "Document list is empty.")
+                            emptyListMovingTextView.text = "Список пуст"
                             emptyListMovingTextView.visibility = View.VISIBLE
                             recyclerView.visibility = View.GONE
-                            adapter.updateData(emptyList())
                         } else {
 
-                            if (documents.isEmpty()) {
-
-                                Log.d("DocumentMovingActivity", "Document list is empty.")
-                                emptyListMovingTextView.text = "Список пуст"
-                                emptyListMovingTextView.visibility = View.VISIBLE
-                                recyclerView.visibility = View.GONE
-                            } else {
-
-                                Log.d("DocumentMovingActivity", "Document list is NOT empty.")
-                                emptyListMovingTextView.visibility = View.GONE
-                                recyclerView.visibility = View.VISIBLE
-                                adapter.updateData(documents)
-                            }
+                            Log.d("DocumentMovingActivity", "Document list is NOT empty.")
+                            emptyListMovingTextView.visibility = View.GONE
+                            recyclerView.visibility = View.VISIBLE
+                            adapter.updateData(documents)
                         }
-
-                    } else {
-                        Log.d("DocumentMovingActivity", "loadDocuments Job was cancelled, UI not updated.")
                     }
+
+                } else {
+                    Log.d("DocumentMovingActivity", "loadDocuments Job was cancelled, UI not updated.")
                 }
             }
         }
     }
-
-
 
 
     override fun onDestroy() {

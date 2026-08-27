@@ -12,6 +12,9 @@ import com.example.scannerkotlin.mappers.DocumentElementMapper
 import com.example.scannerkotlin.mappers.DocumentMapper
 import com.example.scannerkotlin.mappers.ProductMapper
 import com.example.scannerkotlin.mappers.StoreMapper
+import com.example.scannerkotlin.utils.BitrixApiErrorParser
+import com.example.scannerkotlin.utils.BitrixNumberParser
+import com.example.scannerkotlin.utils.MovingConductRetrySync
 import com.example.scannerkotlin.model.Document
 import com.example.scannerkotlin.model.DocumentElement
 import com.example.scannerkotlin.model.Product
@@ -19,15 +22,14 @@ import com.example.scannerkotlin.model.Store
 import com.example.scannerkotlin.request.AddDocumentElementRequest
 import com.example.scannerkotlin.request.CatalogDocumentElementListRequest
 import com.example.scannerkotlin.request.CatalogDocumentListRequest
+import com.example.scannerkotlin.request.ConductDocumentRequest
 import com.example.scannerkotlin.request.DeletedDocumentElementRequest
 import com.example.scannerkotlin.request.NewDocumentRequest
 import com.example.scannerkotlin.request.ProductRequest
 import com.example.scannerkotlin.request.StoreAmountRequest
 import com.example.scannerkotlin.request.UpdatedDocumentElementsRequest
 import com.example.scannerkotlin.request.VariationsRequest
-import com.example.scannerkotlin.response.ErrorResponse
 import com.example.scannerkotlin.response.StoreAmountResponse
-import com.google.gson.Gson
 import com.google.gson.internal.LinkedTreeMap
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -38,6 +40,7 @@ import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
 
 class CatalogDocumentMovingService {
 
@@ -50,7 +53,6 @@ class CatalogDocumentMovingService {
     private val documentElementsMapper = DocumentElementMapper()
     private val productMapper = ProductMapper()
     private val storeMapper = StoreMapper()
-    private val gson = Gson()
 
 
     init {
@@ -273,11 +275,12 @@ class CatalogDocumentMovingService {
         idDocument: Int,
         
     ): Boolean = coroutineScope {
-        if (newProducts.isEmpty()) return@coroutineScope true
+        val productsToAdd = MovingConductRetrySync.pendingAdds(newProducts)
+        if (productsToAdd.isEmpty()) return@coroutineScope true
 
-        Log.d("ApiService", "Adding ${newProducts.size} products for document $idDocument")
+        Log.d("ApiService", "Adding ${productsToAdd.size} products for document $idDocument")
 
-        val deferredResults = newProducts.map { element ->
+        val deferredResults = productsToAdd.map { element ->
             async(Dispatchers.IO) {
                 try {
                     val request = AddDocumentElementRequest(
@@ -296,7 +299,7 @@ class CatalogDocumentMovingService {
                         val responseBody = response.body()
                         val result = responseBody?.get("result") as? Map<*, *>
                         val documentElementMap = result?.get("documentElement") as? Map<*, *>
-                        val id = (documentElementMap?.get("id") as? Double)?.toInt()
+                        val id = BitrixNumberParser.toIntOrNull(documentElementMap?.get("id"))
                         if (id != null) {
                             element.id = id 
                             Log.d("ApiService", "Added product ${element.name} with ID $id")
@@ -338,10 +341,16 @@ class CatalogDocumentMovingService {
                         id = product.id!!, 
                         fields = mutableMapOf(
                             "docId" to idDocument,
-                            "amount" to product.amount.toString() 
+                            "storeFrom" to product.storeFrom,
+                            "storeTo" to product.storeTo,
+                            "amount" to product.amount.toString()
                         )
                     )
-                    Log.d("ApiService", "Sending update for product ${product.id}: Amount ${product.amount}")
+                    Log.d(
+                        "ApiService",
+                        "Sending update for product ${product.id}: amount=${product.amount}, " +
+                            "storeFrom=${product.storeFrom}, storeTo=${product.storeTo}"
+                    )
                     val response = apiBitrix.updateDocumentElement(updateRequest)
                     if (response.isSuccessful) {
                         Log.d("ApiService", "Successfully updated product ${product.id}")
@@ -364,18 +373,16 @@ class CatalogDocumentMovingService {
         return withContext(Dispatchers.IO) {
             try {
                 Log.d("ApiService", "Attempting to conduct document $idDocument")
-                val response = apiBitrix.conductDocument(idDocument)
-                if (response.isSuccessful) {
+                val response = apiBitrix.conductDocument(ConductDocumentRequest(idDocument))
+                val successError = BitrixApiErrorParser.fromSuccessBody(response.body())
+                if (response.isSuccessful && successError == null) {
                     Log.d("ApiService", "Document $idDocument conducted successfully.")
                     true
                 } else {
                     val errorBody = response.errorBody()?.string()
                     Log.e("ApiService", "Failed to conduct document $idDocument: ${response.code()} - $errorBody")
-                    val errorDescription = try {
-                        gson.fromJson(errorBody, ErrorResponse::class.java)?.errorDescription ?: "Unknown API error"
-                    } catch (e: Exception) { "Failed to parse error response" }
-
-                    
+                    val errorDescription = successError
+                        ?: BitrixApiErrorParser.fromHttp(response.code(), errorBody)
                     withContext(Dispatchers.Main) {
                         showAlertInfo(errorDescription, context)
                     }
@@ -483,9 +490,15 @@ class CatalogDocumentMovingService {
 
 
     
+    private val addDocumentInFlight = AtomicBoolean(false)
+
     suspend fun addNewDocument(userId: String?): Boolean { 
         if (userId.isNullOrBlank()) {
             Log.w("ApiService", "Cannot add new document: userId is null or blank.")
+            return false
+        }
+        if (!addDocumentInFlight.compareAndSet(false, true)) {
+            Log.w("ApiService", "addNewDocument ignored: another create is already in flight")
             return false
         }
 
@@ -495,17 +508,21 @@ class CatalogDocumentMovingService {
             "responsibleId" to userId
         ))
 
-        return withContext(Dispatchers.IO) {
-            try {
-                val response = apiBitrix.addNewDocument(request)
-                if (!response.isSuccessful) {
-                    Log.e("ApiService", "addNewDocument failed: ${response.code()} - ${response.errorBody()?.string()}")
+        return try {
+            withContext(Dispatchers.IO) {
+                try {
+                    val response = apiBitrix.addNewDocument(request)
+                    if (!response.isSuccessful) {
+                        Log.e("ApiService", "addNewDocument failed: ${response.code()} - ${response.errorBody()?.string()}")
+                    }
+                    response.isSuccessful
+                } catch (e: Exception) {
+                    Log.e("ApiService", "Error in addNewDocument", e)
+                    false
                 }
-                response.isSuccessful 
-            } catch (e: Exception) {
-                Log.e("ApiService", "Error in addNewDocument", e)
-                false 
             }
+        } finally {
+            addDocumentInFlight.set(false)
         }
     }
 

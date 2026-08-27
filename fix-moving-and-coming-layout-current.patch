@@ -1,0 +1,207 @@
+--- a/app/src/main/java/com/example/scannerkotlin/response/ErrorResponse.kt
++++ b/app/src/main/java/com/example/scannerkotlin/response/ErrorResponse.kt
+@@ -1,7 +1,9 @@
+ package com.example.scannerkotlin.response
+ 
++import com.google.gson.annotations.SerializedName
+ 
+ data class ErrorResponse(
+-    val error: Int,
+-    val errorDescription: String
++    val error: String? = null,
++    @SerializedName("error_description")
++    val errorDescription: String? = null
+ )
+--- a/app/src/main/java/com/example/scannerkotlin/service/CatalogDocumentMovingService.kt
++++ b/app/src/main/java/com/example/scannerkotlin/service/CatalogDocumentMovingService.kt
+@@ -338,10 +338,16 @@
+                         id = product.id!!, 
+                         fields = mutableMapOf(
+                             "docId" to idDocument,
+-                            "amount" to product.amount.toString() 
++                            "storeFrom" to product.storeFrom,
++                            "storeTo" to product.storeTo,
++                            "amount" to product.amount.toString()
+                         )
+                     )
+-                    Log.d("ApiService", "Sending update for product ${product.id}: Amount ${product.amount}")
++                    Log.d(
++                        "ApiService",
++                        "Sending update for product ${product.id}: amount=${product.amount}, " +
++                            "storeFrom=${product.storeFrom}, storeTo=${product.storeTo}"
++                    )
+                     val response = apiBitrix.updateDocumentElement(updateRequest)
+                     if (response.isSuccessful) {
+                         Log.d("ApiService", "Successfully updated product ${product.id}")
+@@ -372,8 +378,12 @@
+                     val errorBody = response.errorBody()?.string()
+                     Log.e("ApiService", "Failed to conduct document $idDocument: ${response.code()} - $errorBody")
+                     val errorDescription = try {
+-                        gson.fromJson(errorBody, ErrorResponse::class.java)?.errorDescription ?: "Unknown API error"
+-                    } catch (e: Exception) { "Failed to parse error response" }
++                        gson.fromJson(errorBody, ErrorResponse::class.java)?.errorDescription
++                            ?.takeIf { it.isNotBlank() }
++                            ?: "Ошибка Bitrix (HTTP ${response.code()})"
++                    } catch (e: Exception) {
++                        "Ошибка Bitrix (HTTP ${response.code()})"
++                    }
+ 
+                     
+                     withContext(Dispatchers.Main) {
+--- a/app/src/main/res/layout/item_coming_product.xml
++++ b/app/src/main/res/layout/item_coming_product.xml
+@@ -5,8 +5,8 @@
+     android:layout_width="match_parent"
+     android:layout_height="match_parent"
+     android:orientation="vertical"
+-    android:paddingHorizontal="16dp"
+-    android:paddingVertical="24dp"
++    android:paddingHorizontal="12dp"
++    android:paddingVertical="10dp"
+     android:background="@drawable/item_yellow_border_dark_bg"
+     android:layout_marginBottom="10dp">
+ 
+@@ -20,7 +20,7 @@
+         <LinearLayout
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:minHeight="56dp"
++            android:minHeight="48dp"
+             android:orientation="horizontal"
+             android:gravity="center_vertical">
+ 
+@@ -30,7 +30,7 @@
+                 android:layout_height="wrap_content"
+                 android:layout_weight="1"
+                 android:text="Товар1"
+-                android:textSize="22sp"
++                android:textSize="18sp"
+                 android:textStyle="bold"
+                 android:textColor="@color/white"
+                 android:maxLines="2"
+@@ -41,20 +41,20 @@
+ 
+             <ImageButton
+                 android:id="@+id/btnCopy"
+-                android:layout_width="56dp"
+-                android:layout_height="56dp"
++                android:layout_width="48dp"
++                android:layout_height="48dp"
+                 android:background="?attr/selectableItemBackgroundBorderless"
+-                android:padding="14dp"
++                android:padding="12dp"
+                 app:srcCompat="@drawable/abc_ic_menu_copy_mtrl_am_alpha"
+                 app:tint="@color/yellow"
+                 tools:ignore="ContentDescription" />
+ 
+             <ImageButton
+                 android:id="@+id/btnDelete"
+-                android:layout_width="56dp"
+-                android:layout_height="56dp"
++                android:layout_width="48dp"
++                android:layout_height="48dp"
+                 android:background="?attr/selectableItemBackgroundBorderless"
+-                android:padding="14dp"
++                android:padding="12dp"
+                 app:srcCompat="@drawable/ic_delete_red"
+                 app:tint="@color/holo_red_dark"
+                 tools:ignore="ContentDescription" />
+@@ -70,7 +70,7 @@
+         <LinearLayout
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:minHeight="72dp"
++            android:minHeight="54dp"
+             android:orientation="horizontal"
+             android:layout_marginTop="6dp">
+ 
+@@ -83,7 +83,7 @@
+                 android:hint="Количество"
+                 android:textColor="@color/white"
+                 android:textColorHint="@color/hint_white"
+-                android:textSize="20sp"
++                android:textSize="18sp"
+                 android:gravity="center"
+                 android:background="@drawable/input_field_yellow_border_blue_bg"
+                 android:paddingHorizontal="12dp"
+@@ -110,7 +110,7 @@
+         <LinearLayout
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:minHeight="72dp"
++            android:minHeight="54dp"
+             android:orientation="horizontal"
+             android:layout_marginTop="4dp">
+ 
+@@ -123,7 +123,7 @@
+                 android:hint="Диаметр"
+                 android:textColor="@color/white"
+                 android:textColorHint="@color/hint_white"
+-                android:textSize="20sp"
++                android:textSize="18sp"
+                 android:gravity="center"
+                 android:background="@drawable/input_field_yellow_border_blue_bg"
+                 android:paddingHorizontal="12dp"
+@@ -139,7 +139,7 @@
+                 android:hint="Вес"
+                 android:textColor="@color/white"
+                 android:textColorHint="@color/hint_white"
+-                android:textSize="20sp"
++                android:textSize="18sp"
+                 android:gravity="center"
+                 android:background="@drawable/input_field_yellow_border_blue_bg"
+                 android:paddingHorizontal="12dp"
+@@ -150,7 +150,7 @@
+         <LinearLayout
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:minHeight="72dp"
++            android:minHeight="54dp"
+             android:orientation="horizontal"
+             android:layout_marginTop="4dp">
+ 
+@@ -162,7 +162,7 @@
+                 android:hint="Толщина стенки"
+                 android:textColor="@color/white"
+                 android:textColorHint="@color/hint_white"
+-                android:textSize="20sp"
++                android:textSize="18sp"
+                 android:gravity="center"
+                 android:background="@drawable/input_field_yellow_border_blue_bg"
+                 android:paddingHorizontal="12dp"
+@@ -172,7 +172,7 @@
+         <LinearLayout
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:minHeight="72dp"
++            android:minHeight="54dp"
+             android:orientation="horizontal"
+             android:layout_marginTop="4dp">
+ 
+@@ -182,7 +182,7 @@
+                 android:layout_height="match_parent"
+                 android:layout_weight="1"
+                 android:hint="Партия"
+-                android:textSize="20sp"
++                android:textSize="18sp"
+                 android:textColor="@color/white"
+                 android:textColorHint="@color/hint_white"
+                 android:background="@drawable/input_field_yellow_border_blue_bg"
+@@ -210,7 +210,7 @@
+             android:id="@+id/barcodeSection"
+             android:layout_width="match_parent"
+             android:layout_height="wrap_content"
+-            android:minHeight="72dp"
++            android:minHeight="54dp"
+             android:orientation="horizontal"
+             android:layout_marginTop="4dp"
+             android:layout_marginBottom="8dp">
+@@ -220,7 +220,7 @@
+                 android:layout_width="match_parent"
+                 android:layout_height="match_parent"
+                 android:hint="Штрихкод"
+-                android:textSize="20sp"
++                android:textSize="18sp"
+                 android:textColor="@color/white"
+                 android:textColorHint="@color/hint_white"
+                 android:background="@drawable/input_field_yellow_border_blue_bg"

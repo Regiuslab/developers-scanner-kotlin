@@ -1,130 +1,101 @@
 # ScannerKotlin
 
-Android-приложение для складского сканирования и работы с документами на базе Bitrix REST.
-Поддерживает сканирование штрихкодов, создание и проведение документов прихода/перемещения,
-а также отдельные рабочие сценарии (СГП и ОТК).
+Android-приложение склада (ТСД) для работы с Bitrix REST: авторизация по PIN, сканирование штрихкодов, черновики и проведение документов **перемещения** и **прихода**, плюс сценарии **инвентаризация**, **приход СГП** и **ОТК**.
 
-## Возможности
+Стек: Kotlin 1.9.24, AGP 8.8.2, `minSdk 24` / `targetSdk 35`, Retrofit + Gson, JDK 11.
 
-- Авторизация по 4‑значному PIN с проверкой через Bitrix REST.
-- Сканирование штрихкодов через аппаратный сканер и обработка в приложении.
-- Документы:
-  - перемещение (docType `M`);
-  - приход (docType `A`);
-  - просмотр списков, редактирование позиций, проведение.
-- Работа с номенклатурой и остатками по складам.
-- Режимы СГП и ОТК для отдельных бизнес‑процессов.
+---
 
-## Основные сценарии
+## Бизнес-логика
 
-- `AuthActivity` — ввод PIN (4 цифры), запрос в Bitrix и сохранение сессии.
-- Роль `storekeeper` (`75`) → `MainActivity` (сканирование, документы, СГП).
-- Роль `otk` (`76`) → `OtkActivity` (контроль качества).
-- Сканирование реализовано через `ScanService` + `BaseScanActivity`.
+### Роли
 
-## Архитектурные заметки
+PIN (4 цифры) сверяется со списком Bitrix (`iblock` паролей). Сессия хранит `userId` и роль.
 
-- `MyApplication` инициализирует `SessionManager` и запускает `ScanService`.
-- Документы перемещения: `DocumentMovingActivity` → позиции в `ProductsDocumentMovingActivity`.
-- Документы прихода: `DocumentComingActivity` → позиции в `ProductsDocumentComingActivity`.
-- Черновики позиций и комментариев хранятся в памяти приложения:
-  - `ComingDocumentDraftManager` для приходов;
-  - `MovingDocumentDraftManager` для перемещений.
+| Роль | Код | После входа |
+|------|-----|-------------|
+| Кладовщик | `75` | Главное меню |
+| ОТК | `76` | Экран ОТК (скан процесса качества) |
 
-## Технологии
+### Кладовщик — главное меню
 
-- Kotlin 1.9.24, Android Gradle Plugin 8.8.2
-- Android SDK: `minSdk 24`, `targetSdk 35`
-- Retrofit + Gson
+1. **Инвентаризация** — скан штрихкода, карточка товара и остатки по складам (без проведения документа).
+2. **Перемещение** — черновики `docType = M`, `status = N`.
+3. **Приход** — черновики `docType = A`, `status = N` (создаются в Bitrix; из приложения только открытие списка).
+4. **Приход СГП** — скан, комплекты/поставщик, проведение своего документа.
+5. **Выйти** — сброс сессии.
 
-## Сборка и запуск
+### Перемещение
 
-Требования: Android Studio, JDK 11, Android SDK.
+1. Список не проведённых черновиков → **Открыть** или **Добавить документ** (`catalog.document.add`).
+2. В документе скан штрихкода (пример: `0000000021968` → товар `318857`). Строка живёт в памяти; в Bitrix уходит только на **Провести**.
+3. Склады «откуда / куда», количество ≤ остатка на складе-источнике, склады не равны.
+4. **Провести**: сначала строки документа, затем `catalog.document.conduct`. Успех — документ проведён в Bitrix с товаром.
 
-Если Gradle сообщает `SDK location not found`, создайте `local.properties` в корне проекта:
+Повторные тапы «Добавить» и «Провести» на клиенте отсекаются. Если строки уже ушли в Bitrix, а проведение упало, повтор не дублирует позиции.
+
+### Приход
+
+1. Список черновиков, **новые сверху** (по дате создания).
+2. Открыть документ → позиции: количество, единица, диаметр/вес/стенка, партия, «старая продукция», штрихкод. Карточка прокручивается.
+3. **Добавить товар** / копирование позиции. **Сохранить и провести учет** пишет вариации, штрихкоды и проводит документ.
+
+### Сканер на ТСД
+
+Железо шлёт `com.xcheng.scanner.action.BARCODE_DECODING_BROADCAST` → `ScanService` → локальный `Scan_data_received` → `BaseScanActivity.onBarcodeScanned`. На эмуляторе без broadcast сканера скан не воспроизводится.
+
+Черновики позиций до проведения: `MovingDocumentDraftManager` / `ComingDocumentDraftManager` (память процесса, не диск).
+
+---
+
+## Быстрый старт
+
+Нужны Android Studio (или SDK + JDK 11) и эмулятор/ТСД с API 24+.
+
+Если Gradle пишет `SDK location not found`, в корне создайте `local.properties`:
 
 ```properties
-sdk.dir=/home/<username>/Android/Sdk
+sdk.dir=C:\\Users\\<user>\\AppData\\Local\\Android\\Sdk
 ```
+
+Сборка и установка debug:
 
 ```bash
 ./gradlew assembleDebug
-```
-
-Установка на устройство/эмулятор:
-
-```bash
 ./gradlew installDebug
 ```
 
-## Тесты и пересборка
+Windows: `gradlew.bat` вместо `./gradlew`.
 
-Юнит-тесты:
+Полная пересборка: `./gradlew clean assembleDebug`.
 
-```bash
-./gradlew testDebugUnitTest
-```
-
-Инструментальные тесты (устройство/эмулятор должен быть запущен):
-
-```bash
-./gradlew connectedAndroidTest
-```
-
-Полная пересборка (очистка + debug):
-
-```bash
-./gradlew clean assembleDebug
-```
-
-Сборка релизного APK:
-
-```bash
-./gradlew assembleRelease
-```
-
-Готовые APK:
+APK:
 
 - debug: `app/build/outputs/apk/debug/app-debug.apk`
-- release: `app/build/outputs/apk/release/app-release.apk`
+- release: `./gradlew assembleRelease` → `app/build/outputs/apk/release/app-release.apk`
 
-## Конфигурация Bitrix REST
+Юнит-тесты: `./gradlew testDebugUnitTest`.
 
-В проекте используются **жестко заданные** REST‑адреса Bitrix. При переносе на другой контур
-обновите базовые URL в следующих классах:
+На устройстве: поставить debug APK, PIN кладовщика, сценарий из раздела «Бизнес-логика». Для перемещения/прихода нужен доступ к Bitrix REST из сети ТСД.
 
-- `UserService` — авторизация по PIN.
-- `CatalogDocumentMovingService`, `CatalogDocumentComingService`, `OtkService` — работа с документами/процессами.
-- `CatalogDocumentComingService` — отдельный `barcodeBaseUrl` для операций со штрихкодами.
-- `ScanActivity`, `SgpActivity`, `ProductsDocumentMovingActivity` — запросы по штрихкодам/товарам.
+REST-адреса **зашиты в коде** (несколько разных вебхуков). Смена контура — правки в сервисах/активностях, см. модуль `service` и `ScanActivity` / `SgpActivity` / `ProductsDocumentMovingActivity`.
 
-## Интеграция сканера
+---
 
-Сканирование работает через broadcast:
+## Кодовая база (по модулям)
 
-- Внешний сканер шлет `com.xcheng.scanner.action.BARCODE_DECODING_BROADCAST`.
-- `ScanService` принимает событие и рассылает локальный `Scan_data_received` с extra `scanData`.
-- Активности наследуются от `BaseScanActivity` и получают данные в `onBarcodeScanned`.
+Корень пакета: `app/src/main/java/com/example/scannerkotlin/`.
 
-## Структура проекта
+| Модуль | Зачем |
+|--------|--------|
+| `activities` | Экраны: PIN, меню, списки документов, позиции, инвентаризация, СГП, ОТК |
+| `service` | Bitrix REST: пользователи, перемещение, приход, СГП, ОТК, фоновый `ScanService` |
+| `api` | Один Retrofit-интерфейс `ApiBitrix` |
+| `adapter` | Списки документов и карточки товаров (в т.ч. спиннеры складов прихода/перемещения) |
+| `mappers` | JSON Bitrix → `Document` / `Store` / `Product` / строка документа |
+| `model` | Доменные модели |
+| `request` / `response` | DTO запросов и ответов REST |
+| `utils` | Сессия, роли, скан, черновики, парсер id Bitrix, защита от двойных тапов, ошибки API |
+| `res/layout` | Экраны ТСД (тёмная тема, крупные кнопки) |
 
-- `app/src/main/java/com/example/scannerkotlin/activities` — экраны приложения
-- `app/src/main/java/com/example/scannerkotlin/service` — сервисы и работа с API
-- `app/src/main/java/com/example/scannerkotlin/api` — интерфейс Retrofit
-- `app/src/main/java/com/example/scannerkotlin/adapter` — адаптеры списков
-- `app/src/main/java/com/example/scannerkotlin/mappers` — мапперы API → модели
-- `app/src/main/java/com/example/scannerkotlin/model` — модели данных
-- `app/src/main/java/com/example/scannerkotlin/request` и `response` — DTO для API
-- `app/src/main/java/com/example/scannerkotlin/utils` — утилиты, сессия, черновики
-
-## Тесты
-
-```bash
-./gradlew test
-```
-
-Инструментальные тесты:
-
-```bash
-./gradlew connectedAndroidTest
-```
+Точка входа: `MyApplication` (сессия + `ScanService`) → `AuthActivity`.

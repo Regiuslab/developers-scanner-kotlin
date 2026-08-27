@@ -13,15 +13,16 @@ import com.example.scannerkotlin.model.Provider
 import com.example.scannerkotlin.request.AddDocumentElementRequest
 import com.example.scannerkotlin.request.BlankRequest
 import com.example.scannerkotlin.request.CatalogDocumentListRequest
+import com.example.scannerkotlin.request.ConductDocumentRequest
 import com.example.scannerkotlin.request.GettingProvidersRequest
 import com.example.scannerkotlin.request.NewDocumentRequest
 import com.example.scannerkotlin.request.ProcessUpdateRequest
 import com.example.scannerkotlin.request.ProviderRequest
 import com.example.scannerkotlin.request.SgpRequest
 import com.example.scannerkotlin.request.VariationsRequest
-import com.example.scannerkotlin.response.FirstBlankResponse
-
+import com.example.scannerkotlin.utils.BitrixApiErrorParser
 import com.example.scannerkotlin.response.ErrorResponse
+import com.example.scannerkotlin.response.FirstBlankResponse
 import com.example.scannerkotlin.response.GettingProvidersResponse
 import com.example.scannerkotlin.response.SecondBlankResponse
 import com.google.gson.Gson
@@ -837,16 +838,16 @@ class SgpService(
         return withContext(Dispatchers.IO) {
             try {
                 Log.d("ComingService", "Attempting to conduct document $idDocument")
-                val response = apiBitrix.conductDocument(idDocument)
-                if (response.isSuccessful) {
+                val response = apiBitrix.conductDocument(ConductDocumentRequest(idDocument))
+                val successError = BitrixApiErrorParser.fromSuccessBody(response.body())
+                if (response.isSuccessful && successError == null) {
                     Log.d("ComingService", "Document $idDocument conducted successfully.")
                     true
                 } else {
                     val errorBody = response.errorBody()?.string()
                     Log.e("ComingService", "Failed to conduct document $idDocument: ${response.code()} - $errorBody")
-                    val errorDescription = try {
-                        gson.fromJson(errorBody, ErrorResponse::class.java)?.errorDescription ?: "Unknown API error conducting document"
-                    } catch (e: Exception) { "Failed to parse conduct error response" }
+                    val errorDescription = successError
+                        ?: BitrixApiErrorParser.fromHttp(response.code(), errorBody)
 
                     withContext(Dispatchers.Main) {
                         showAlertInfo(errorDescription, context)

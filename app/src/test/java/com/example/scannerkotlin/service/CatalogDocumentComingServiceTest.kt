@@ -34,8 +34,11 @@ class CatalogDocumentComingServiceTest {
         val success = result as ConductResult.SaveResult.Success
         assertEquals(1, success.savedVariations.size)
         assertEquals(432, success.savedVariations.first().first)
-        Mockito.verify(apiBitrix, Mockito.never()).addVariationsOfProduct(any(ProductOfferRequest::class.java))
-        Mockito.verify(apiBarcode, Mockito.never()).setBarcodeByProductId(any(BarcodeRequest::class.java))
+        Mockito.verify(apiBitrix, Mockito.never())
+            .addVariationsOfProduct(any(ProductOfferRequest::class.java))
+        Mockito.verify(apiBarcode, Mockito.never())
+            .setBarcodeByProductId(any(BarcodeRequest::class.java))
+        Unit
     }
 
     @Test
@@ -56,8 +59,11 @@ class CatalogDocumentComingServiceTest {
         assertTrue(result is ConductResult.SaveResult.Success)
         val success = result as ConductResult.SaveResult.Success
         assertEquals(777, success.savedVariations.first().first)
-        Mockito.verify(apiBitrix).addVariationsOfProduct(any(ProductOfferRequest::class.java))
-        Mockito.verify(apiBarcode).setBarcodeByProductId(any(BarcodeRequest::class.java))
+        Mockito.verify(apiBitrix)
+            .addVariationsOfProduct(any(ProductOfferRequest::class.java))
+        Mockito.verify(apiBarcode)
+            .setBarcodeByProductId(any(BarcodeRequest::class.java))
+        Unit
     }
 
     @Test

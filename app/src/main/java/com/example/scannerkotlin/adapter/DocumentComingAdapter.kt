@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.example.scannerkotlin.R
 import com.example.scannerkotlin.activities.ProductsDocumentComingActivity
 import com.example.scannerkotlin.model.Document
+import com.example.scannerkotlin.utils.DocumentListNewestFirst
 
 class DocumentComingAdapter(private val documentList: MutableList<Document>) :
     RecyclerView.Adapter<DocumentComingAdapter.DocumentViewHolder>() {
@@ -57,7 +58,7 @@ class DocumentComingAdapter(private val documentList: MutableList<Document>) :
     @SuppressLint("NotifyDataSetChanged")
     fun updateData(newDocuments: List<Document>) {
         documentList.clear()
-        documentList.addAll(newDocuments)
+        documentList.addAll(DocumentListNewestFirst.sort(newDocuments))
         notifyDataSetChanged()
     }
 }

@@ -1,8 +1,7 @@
 package com.example.scannerkotlin.mappers
 
-import android.os.Build
-import androidx.annotation.RequiresApi
 import com.example.scannerkotlin.model.Store
+import com.example.scannerkotlin.utils.BitrixNumberParser
 import com.google.gson.internal.LinkedTreeMap
 import java.text.SimpleDateFormat
 import java.util.*
@@ -21,14 +20,14 @@ class StoreMapper {
             email = storeMap["email"] as? String,
             latitude = (storeMap["gpsN"] as? Double) ?: 0.0,
             longitude = (storeMap["gpsS"] as? Double) ?: 0.0,
-            id = (storeMap["id"] as? Double)?.toInt() ?: 0,
+            id = BitrixNumberParser.toIntOrDefault(storeMap["id"], 0),
             isIssuingCenter = storeMap["issuingCenter"] as? String ?: "N",
             modifiedBy = storeMap["modifiedBy"]?.toString(),
             phone = storeMap["phone"] as? String ?: "",
             schedule = storeMap["schedule"] as? String ?: "",
-            sort = (storeMap["sort"] as? Double)?.toInt() ?: 100,
+            sort = BitrixNumberParser.toIntOrDefault(storeMap["sort"], 100),
             title = storeMap["title"] as? String ?: "",
-            userId = (storeMap["userId"] as? Double)?.toInt(),
+            userId = BitrixNumberParser.toIntOrNull(storeMap["userId"]),
             xmlId = storeMap["xmlId"] as? String
         )
     }
