@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!--
+      Compact spacing for small TSD viewports (e.g. 480x800).
+      Touch targets stay 48dp; save space via margins/padding only.
+      Wider devices override via values-sw360dp.
+    -->
+    <dimen name="coming_screen_padding">4dp</dimen>
+    <dimen name="coming_header_margin_top">4dp</dimen>
+    <dimen name="coming_rv_margin_top">4dp</dimen>
+    <dimen name="coming_rv_margin_bottom">4dp</dimen>
+    <dimen name="coming_button_bar_margin_top">6dp</dimen>
+    <dimen name="coming_button_min_height">48dp</dimen>
+
+    <dimen name="coming_card_padding_horizontal">8dp</dimen>
+    <dimen name="coming_card_padding_vertical">4dp</dimen>
+    <dimen name="coming_card_margin_bottom">4dp</dimen>
+    <dimen name="coming_row_margin_top">3dp</dimen>
+    <dimen name="coming_field_min_height">48dp</dimen>
+    <dimen name="coming_action_button_size">48dp</dimen>
+    <dimen name="coming_action_button_padding">12dp</dimen>
+    <dimen name="coming_barcode_section_margin_bottom">2dp</dimen>
+    <dimen name="coming_product_name_text">16sp</dimen>
+    <dimen name="coming_field_text">16sp</dimen>
+    <integer name="coming_product_name_max_lines">3</integer>
+</resources>

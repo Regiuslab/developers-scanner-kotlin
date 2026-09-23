@@ -4,22 +4,25 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true"
-    android:overScrollMode="ifContentScrolls">
+    android:fillViewport="false"
+    android:overScrollMode="ifContentScrolls"
+    android:scrollbars="vertical"
+    android:clipToPadding="false">
 
     <LinearLayout
+        android:id="@+id/comingProductCard"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:paddingHorizontal="12dp"
-        android:paddingVertical="8dp"
+        android:paddingHorizontal="@dimen/coming_card_padding_horizontal"
+        android:paddingVertical="@dimen/coming_card_padding_vertical"
         android:background="@drawable/item_yellow_border_dark_bg"
-        android:layout_marginBottom="8dp">
+        android:layout_marginBottom="@dimen/coming_card_margin_bottom">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="48dp"
+            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
             android:gravity="center_vertical">
 
@@ -29,10 +32,10 @@
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
                 android:text="Товар1"
-                android:textSize="16sp"
+                android:textSize="@dimen/coming_product_name_text"
                 android:textStyle="bold"
                 android:textColor="@color/white"
-                android:maxLines="4"
+                android:maxLines="3"
                 android:ellipsize="end"
                 android:clickable="false"
                 android:focusable="false"
@@ -40,20 +43,20 @@
 
             <ImageButton
                 android:id="@+id/btnCopy"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="@dimen/coming_action_button_size"
+                android:layout_height="@dimen/coming_action_button_size"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:padding="12dp"
+                android:padding="@dimen/coming_action_button_padding"
                 app:srcCompat="@drawable/abc_ic_menu_copy_mtrl_am_alpha"
                 app:tint="@color/yellow"
                 tools:ignore="ContentDescription" />
 
             <ImageButton
                 android:id="@+id/btnDelete"
-                android:layout_width="48dp"
-                android:layout_height="48dp"
+                android:layout_width="@dimen/coming_action_button_size"
+                android:layout_height="@dimen/coming_action_button_size"
                 android:background="?attr/selectableItemBackgroundBorderless"
-                android:padding="12dp"
+                android:padding="@dimen/coming_action_button_padding"
                 app:srcCompat="@drawable/ic_delete_red"
                 app:tint="@color/holo_red_dark"
                 tools:ignore="ContentDescription" />
@@ -62,30 +65,30 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="48dp"
+            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
-            android:layout_marginTop="6dp">
+            android:layout_marginTop="@dimen/coming_row_margin_top">
 
             <EditText
                 android:id="@+id/etQuantity"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
+                android:minHeight="@dimen/coming_field_min_height"
                 android:layout_weight="1"
                 android:inputType="number"
                 android:hint="Количество"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
-                android:textSize="16sp"
+                android:textSize="@dimen/coming_field_text"
                 android:gravity="center"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
                 android:paddingHorizontal="12dp"
-                android:layout_marginEnd="10dp" />
+                android:layout_marginEnd="8dp" />
 
             <Spinner
                 android:id="@+id/spinnerMeasure"
                 android:layout_width="0dp"
-                android:layout_height="48dp"
+                android:layout_height="@dimen/coming_field_min_height"
                 android:layout_weight="1"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
                 android:paddingHorizontal="12dp"
@@ -95,37 +98,37 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="48dp"
+            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
-            android:layout_marginTop="6dp">
+            android:layout_marginTop="@dimen/coming_row_margin_top">
 
             <EditText
                 android:id="@+id/etDiameter"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
+                android:minHeight="@dimen/coming_field_min_height"
                 android:layout_weight="1"
                 android:inputType="numberDecimal"
                 android:hint="Диаметр"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
-                android:textSize="16sp"
+                android:textSize="@dimen/coming_field_text"
                 android:gravity="center"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
                 android:paddingHorizontal="12dp"
-                android:layout_marginEnd="10dp" />
+                android:layout_marginEnd="8dp" />
 
             <EditText
                 android:id="@+id/etWeight"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
+                android:minHeight="@dimen/coming_field_min_height"
                 android:layout_weight="1"
                 android:inputType="numberDecimal"
                 android:hint="Вес"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
-                android:textSize="16sp"
+                android:textSize="@dimen/coming_field_text"
                 android:gravity="center"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
                 android:paddingHorizontal="12dp" />
@@ -135,13 +138,13 @@
             android:id="@+id/etWallThickness"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="48dp"
-            android:layout_marginTop="6dp"
+            android:minHeight="@dimen/coming_field_min_height"
+            android:layout_marginTop="@dimen/coming_row_margin_top"
             android:inputType="numberDecimal"
             android:hint="Толщина стенки"
             android:textColor="@color/white"
             android:textColorHint="@color/hint_white"
-            android:textSize="16sp"
+            android:textSize="@dimen/coming_field_text"
             android:gravity="center"
             android:background="@drawable/input_field_yellow_border_blue_bg"
             android:paddingHorizontal="12dp" />
@@ -149,18 +152,18 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="48dp"
+            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
-            android:layout_marginTop="6dp">
+            android:layout_marginTop="@dimen/coming_row_margin_top">
 
             <EditText
                 android:id="@+id/etBatchNumber"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
+                android:minHeight="@dimen/coming_field_min_height"
                 android:layout_weight="1"
                 android:hint="Партия"
-                android:textSize="16sp"
+                android:textSize="@dimen/coming_field_text"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
@@ -171,7 +174,7 @@
                 android:id="@+id/cbOldProduct"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
+                android:minHeight="@dimen/coming_field_min_height"
                 android:layout_weight="1"
                 android:text="Старая продукция"
                 android:textColor="@color/white"
@@ -183,18 +186,18 @@
             android:id="@+id/barcodeSection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="48dp"
+            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
-            android:layout_marginTop="6dp"
-            android:layout_marginBottom="4dp">
+            android:layout_marginTop="@dimen/coming_row_margin_top"
+            android:layout_marginBottom="@dimen/coming_barcode_section_margin_bottom">
 
             <EditText
                 android:id="@+id/tvBarcode"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:minHeight="48dp"
+                android:minHeight="@dimen/coming_field_min_height"
                 android:hint="Штрихкод"
-                android:textSize="16sp"
+                android:textSize="@dimen/coming_field_text"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
@@ -210,7 +213,7 @@
             android:textColor="@android:color/holo_red_light"
             android:textSize="12sp"
             android:paddingTop="2dp"
-            android:paddingBottom="8dp"
+            android:paddingBottom="4dp"
             android:visibility="gone"/>
     </LinearLayout>
 </androidx.core.widget.NestedScrollView>

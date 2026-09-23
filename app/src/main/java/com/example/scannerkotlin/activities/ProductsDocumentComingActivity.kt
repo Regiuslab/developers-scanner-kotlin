@@ -13,6 +13,9 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.PagerSnapHelper
@@ -74,8 +77,9 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
     @SuppressLint("UnspecifiedRegisterReceiverFlag", "NewApi")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        WindowCompat.setDecorFitsSystemWindows(window, false)
         setContentView(R.layout.activity_document_products)
-
+        setupWindowInsets()
 
         idDocument = intent.getStringExtra("idDocument")?.toIntOrNull()
 
@@ -98,6 +102,28 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
 
         updateSaveButtonState()
         updateEmptyStateVisibility()
+    }
+
+    private fun setupWindowInsets() {
+        val root = findViewById<View>(R.id.comingProductsRoot)
+        val initialLeft = root.paddingLeft
+        val initialTop = root.paddingTop
+        val initialRight = root.paddingRight
+        val initialBottom = root.paddingBottom
+
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, windowInsets ->
+            val insets = windowInsets.getInsets(
+                WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout()
+            )
+            view.setPadding(
+                initialLeft + insets.left,
+                initialTop + insets.top,
+                initialRight + insets.right,
+                initialBottom + insets.bottom
+            )
+            windowInsets
+        }
+        ViewCompat.requestApplyInsets(root)
     }
     @SuppressLint("NotifyDataSetChanged")
     private fun loadInitialState() {
@@ -156,6 +182,8 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
 
     @SuppressLint("NotifyDataSetChanged")
     private fun setupRecyclerView() {
+        // Keep original vertical paging. With fillViewport=false and a compact card,
+        // NestedScrollView only intercepts when content actually overflows.
         recyclerView.layoutManager = LinearLayoutManager(this)
 
         adapter = ProductComingAdapter(
