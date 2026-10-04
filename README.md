@@ -80,7 +80,19 @@ APK:
 
 На устройстве: поставить debug APK, PIN кладовщика, сценарий из раздела «Бизнес-логика». Для перемещения/прихода нужен доступ к Bitrix REST из сети ТСД.
 
-REST-адреса **зашиты в коде** (несколько разных вебхуков). Смена контура — правки в сервисах/активностях, см. модуль `service` и `ScanActivity` / `SgpActivity` / `ProductsDocumentMovingActivity`.
+### Конфигурация Bitrix24 (смена клиента)
+
+Параметры портала вынесены в Gradle/`BuildConfig`. Чтобы пересобрать приложение под другого пользователя Б24:
+
+1. Скопируйте `bitrix.properties.example` → `bitrix.properties` (файл в `.gitignore`).
+2. Заполните host, webhook-токены, iblock/роли.
+3. Выполните `./gradlew clean assembleDebug`.
+
+Приоритет: `local.properties` > `bitrix.properties` > defaults в `app/build.gradle.kts` (текущий контур izocom).
+
+Код читает настройки через `config.BitrixConfig` / `config.BitrixClientFactory` — править Kotlin под каждого клиента не нужно.
+
+Разработчик: **ООО «РЕГИУСЛАБ»** ([regiuslab.by](https://regiuslab.by/)), УНП 193776565.
 
 ---
 
@@ -97,7 +109,8 @@ REST-адреса **зашиты в коде** (несколько разных 
 | `mappers` | JSON Bitrix → `Document` / `Store` / `Product` / строка документа |
 | `model` | Доменные модели |
 | `request` / `response` | DTO запросов и ответов REST |
-| `utils` | Сессия, роли, скан, черновики, парсер id Bitrix, защита от двойных тапов, ошибки API |
+| `config` | `BitrixConfig` / `BitrixClientFactory` — портал и вебхуки из BuildConfig |
+| `utils` | Сессия, роли, скан, черновики, парсер id Bitrix, защита от двойных тапов, ошибки API, `DeveloperCredits` |
 | `res/layout` | Экраны ТСД (тёмная тема, крупные кнопки) |
 
 Точка входа: `MyApplication` (сессия + `ScanService`) → `AuthActivity`.

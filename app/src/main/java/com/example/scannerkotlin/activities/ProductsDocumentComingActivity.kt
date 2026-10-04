@@ -235,7 +235,7 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
         lifecycleScope.launch {
             var productsForSelection: List<Product> = emptyList()
             var error: Throwable? = null
-            val iblockId = 14
+            val iblockId = com.example.scannerkotlin.config.BitrixConfig.iblockProducts
             try {
                 productsForSelection = service.getProductsForSelection(iblockId, productsForSelectionId)
                 Log.d("ProductsComingActivity", "Loaded ${productsForSelection.size} products for selection via service")

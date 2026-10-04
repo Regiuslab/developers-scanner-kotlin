@@ -579,7 +579,7 @@ class SgpService(
             val request = VariationsRequest(
                 select = listOf("id", "property81", "iblockId"),
                 filter = mapOf(
-                    "iblockId" to 15,
+                    "iblockId" to com.example.scannerkotlin.config.BitrixConfig.iblockOffers,
                     "id" to productId
                 )
             )
@@ -625,7 +625,7 @@ class SgpService(
             val request = VariationsRequest(
                 select = listOf("id", "property82", "iblockId"),
                 filter = mapOf(
-                    "iblockId" to 15,
+                    "iblockId" to com.example.scannerkotlin.config.BitrixConfig.iblockOffers,
                     "id" to elementId
                 )
             )

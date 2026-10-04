@@ -212,11 +212,7 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
         service = CatalogDocumentMovingService() 
 
         
-        val retrofitInstance: Retrofit = Retrofit.Builder()
-            .baseUrl("https://bitrix.izocom.by/rest/1/c953o6imkob2gpwd/") 
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-        apiBitrix = retrofitInstance.create(ApiBitrix::class.java)
+        apiBitrix = com.example.scannerkotlin.config.BitrixClientFactory.barcodeScanApi()
     }
 
     private fun initializeViews() {

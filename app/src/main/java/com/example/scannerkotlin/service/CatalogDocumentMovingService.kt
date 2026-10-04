@@ -8,6 +8,8 @@ import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AlertDialog
 import com.example.scannerkotlin.activities.MainActivity
 import com.example.scannerkotlin.api.ApiBitrix
+import com.example.scannerkotlin.config.BitrixClientFactory
+import com.example.scannerkotlin.config.BitrixConfig
 import com.example.scannerkotlin.mappers.DocumentElementMapper
 import com.example.scannerkotlin.mappers.DocumentMapper
 import com.example.scannerkotlin.mappers.ProductMapper
@@ -37,31 +39,18 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 class CatalogDocumentMovingService {
 
-    private val baseUrl = "https://bitrix.izocom.by/rest/1/o2deu7wx7zfl3ib4/"
-
-    private var apiBitrix: ApiBitrix
+    private var apiBitrix: ApiBitrix = BitrixClientFactory.catalogApi()
 
 
     private val documentMapper = DocumentMapper()
     private val documentElementsMapper = DocumentElementMapper()
     private val productMapper = ProductMapper()
     private val storeMapper = StoreMapper()
-
-
-    init {
-        val retrofit: Retrofit = Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-        apiBitrix = retrofit.create(ApiBitrix::class.java)
-    }
 
 
 
@@ -192,7 +181,12 @@ class CatalogDocumentMovingService {
                 if (documentElements.isNotEmpty()) {
                     val elementIds = documentElements.mapNotNull { it.elementId }
                     if (elementIds.isNotEmpty()) {
-                        val productRequest = ProductRequest(filter = mapOf("id" to elementIds, "iblockId" to listOf(14, 15)))
+                        val productRequest = ProductRequest(
+                            filter = mapOf(
+                                "id" to elementIds,
+                                "iblockId" to listOf(BitrixConfig.iblockProducts, BitrixConfig.iblockOffers)
+                            )
+                        )
                         val productsResponse = apiBitrix.getProducts(productRequest)
                         val productsMap = mutableMapOf<Int, Product>()
 

@@ -2,6 +2,7 @@ package com.example.scannerkotlin.service
 
 import android.util.Log
 import com.example.scannerkotlin.api.ApiBitrix
+import com.example.scannerkotlin.config.BitrixClientFactory
 import com.example.scannerkotlin.request.ProcessUpdateRequest
 import com.example.scannerkotlin.request.ProcessesRequest
 import com.example.scannerkotlin.response.ProcessesResponse
@@ -9,23 +10,11 @@ import com.example.scannerkotlin.utils.SessionManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException
 
 class OtkService {
 
-    private val baseUrl = "https://bitrix.izocom.by/rest/1/o2deu7wx7zfl3ib4/"
-    private var apiBitrix: ApiBitrix
-
-
-    init {
-        val retrofit: Retrofit = Retrofit.Builder()
-            .baseUrl(baseUrl)
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-        apiBitrix = retrofit.create(ApiBitrix::class.java)
-    }
+    private var apiBitrix: ApiBitrix = BitrixClientFactory.catalogApi()
 
 
     suspend fun getProcessByBarcode(barcode: String): ProcessesResponse? {

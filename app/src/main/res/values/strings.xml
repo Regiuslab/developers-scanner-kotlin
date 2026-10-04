@@ -40,4 +40,10 @@
     <string name="logoutButton">ВЫЙТИ</string>
     <string name="incomingSgpButton">ПРИХОД СГП</string>
     <string name="conduct_button_text">Провести</string>
+
+    <!-- Developer: RegiusLab (https://regiuslab.by/) -->
+    <string name="developer_powered_by">Разработано в RegiusLab</string>
+    <string name="developer_about_title">О разработчике</string>
+    <string name="developer_open_website">Сайт RegiusLab</string>
+    <string name="developer_about_body">%1$s\nУНП: %2$s\n\nIT-продукты для бизнеса: автоматизация, Битрикс24, 1С, веб и мобильная разработка.\n\nСайт: %3$s\nE-mail: %4$s\nТел.: %5$s\n\nЮр. адрес: %6$s\nОфис: %7$s</string>
 </resources>

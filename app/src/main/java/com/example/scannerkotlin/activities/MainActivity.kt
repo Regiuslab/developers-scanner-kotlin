@@ -3,14 +3,14 @@ package com.example.scannerkotlin.activities
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
+import android.widget.TextView
 import android.widget.Toast
 
 import com.google.android.material.button.MaterialButton
 import androidx.appcompat.app.AppCompatActivity
 
 import com.example.scannerkotlin.R
-import com.example.scannerkotlin.service.ScanService
-
+import com.example.scannerkotlin.utils.DeveloperCredits
 import com.example.scannerkotlin.utils.SessionManager
 
 
@@ -80,6 +80,10 @@ class MainActivity : AppCompatActivity() {
 
         sgpButton.setOnClickListener {
             startSgpActivity()
+        }
+
+        findViewById<TextView>(R.id.regiusLabel).setOnClickListener {
+            DeveloperCredits.showAboutDialog(this)
         }
     }
 

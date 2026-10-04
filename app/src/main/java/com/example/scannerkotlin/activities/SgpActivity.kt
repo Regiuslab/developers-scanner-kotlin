@@ -51,11 +51,7 @@ class SgpActivity : BaseScanActivity() {
     }
 
     private val apiBitrix: ApiBitrix by lazy {
-        Retrofit.Builder()
-            .baseUrl("https://bitrix.izocom.by/rest/1/c953o6imkob2gpwd/")
-            .addConverterFactory(GsonConverterFactory.create())
-            .build()
-            .create(ApiBitrix::class.java)
+        com.example.scannerkotlin.config.BitrixClientFactory.barcodeScanApi()
     }
     private var sgpService: SgpService? = null
 

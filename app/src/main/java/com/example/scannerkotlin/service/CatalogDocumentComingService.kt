@@ -6,6 +6,8 @@ import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.appcompat.app.AlertDialog
 import com.example.scannerkotlin.api.ApiBitrix
+import com.example.scannerkotlin.config.BitrixClientFactory
+import com.example.scannerkotlin.config.BitrixConfig
 import com.example.scannerkotlin.mappers.DocumentElementMapper
 import com.example.scannerkotlin.mappers.DocumentMapper
 import com.example.scannerkotlin.mappers.ProductMapper
@@ -19,15 +21,12 @@ import com.google.gson.Gson
 import com.google.gson.internal.LinkedTreeMap
 import kotlinx.coroutines.* 
 import retrofit2.HttpException
-import retrofit2.Retrofit
-
-import retrofit2.converter.gson.GsonConverterFactory
 import java.io.IOException 
 
 @RequiresApi(Build.VERSION_CODES.O) 
 class CatalogDocumentComingService(
-    private var apiBitrix: ApiBitrix = createApi(DEFAULT_BASE_URL),
-    private var apiBarcode: ApiBitrix = createApi(DEFAULT_BARCODE_BASE_URL)
+    private var apiBitrix: ApiBitrix = BitrixClientFactory.catalogApi(),
+    private var apiBarcode: ApiBitrix = BitrixClientFactory.barcodeComingApi()
 ) {
     private val gson = Gson()
 
@@ -35,19 +34,6 @@ class CatalogDocumentComingService(
     private val documentMapper = DocumentMapper()
     private val documentElementsMapper = DocumentElementMapper()
     private val productMapper = ProductMapper()
-
-    companion object {
-        private const val DEFAULT_BASE_URL = "https://bitrix.izocom.by/rest/1/o2deu7wx7zfl3ib4/"
-        private const val DEFAULT_BARCODE_BASE_URL = "https://bitrix.izocom.by/rest/1/sh1lchx64vrzcor6/"
-
-        private fun createApi(baseUrl: String): ApiBitrix {
-            val retrofit: Retrofit = Retrofit.Builder()
-                .baseUrl(baseUrl)
-                .addConverterFactory(GsonConverterFactory.create())
-                .build()
-            return retrofit.create(ApiBitrix::class.java)
-        }
-    }
 
     
 
@@ -550,7 +536,7 @@ class CatalogDocumentComingService(
     private suspend fun addVariationOfProductSuspend(productOffer: ProductOffer): Int? {
         
         val fieldsMap: MutableMap<String, Any?> = mutableMapOf(
-            "iblockId" to 15, 
+            "iblockId" to BitrixConfig.iblockOffers, 
             "name" to productOffer.name,
             "measure" to productOffer.measure,
             "parentId" to productOffer.parentId,

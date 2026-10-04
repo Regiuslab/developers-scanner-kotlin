@@ -9,6 +9,11 @@ build/
 .externalNativeBuild
 .cxx
 local.properties
+bitrix.properties
 dist/
 *.apk
 *.zip
+# Local screenshot / layout fixtures (not product)
+before-*.png
+after-*.png
+screenshots/

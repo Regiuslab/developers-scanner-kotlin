@@ -2,6 +2,8 @@ package com.example.scannerkotlin.service
 
 import android.util.Log
 import com.example.scannerkotlin.api.ApiBitrix
+import com.example.scannerkotlin.config.BitrixClientFactory
+import com.example.scannerkotlin.config.BitrixConfig
 import com.example.scannerkotlin.dto.UserCredentials
 import com.example.scannerkotlin.request.PasswordRequest
 import com.example.scannerkotlin.response.PasswordResponse
@@ -9,21 +11,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import retrofit2.HttpException
 import retrofit2.Response
-import retrofit2.Retrofit
-import retrofit2.converter.gson.GsonConverterFactory
 
 
 
 class UserService {
 
-    private val baseUrl = "https://bitrix.izocom.by/rest/1/o2deu7wx7zfl3ib4/"
-
-    private val retrofit: Retrofit = Retrofit.Builder()
-        .baseUrl(baseUrl)
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
-
-    private val apiBitrix: ApiBitrix = retrofit.create(ApiBitrix::class.java)
+    private val apiBitrix: ApiBitrix = BitrixClientFactory.catalogApi()
 
 
     suspend fun getPasswords(passwordToSearch: String): List<UserCredentials>? {
@@ -31,7 +24,7 @@ class UserService {
             withContext(Dispatchers.IO) {
 
                 val request = PasswordRequest(
-                    iblockId = 18,
+                    iblockId = BitrixConfig.iblockPin,
                     iblockTypeId = "lists",
                     filter = mapOf(
                         "PROPERTY_71" to mapOf(

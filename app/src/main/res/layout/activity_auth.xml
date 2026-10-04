@@ -76,10 +76,11 @@
         android:rowCount="4"
         android:layout_marginTop="40dp"
         android:layout_marginBottom="40dp"
-        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintBottom_toTopOf="@id/regiusLabel"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/passwordDotsContainer">
+        app:layout_constraintTop_toBottomOf="@id/passwordDotsContainer"
+        app:layout_constraintVertical_bias="0.35">
 
 
         <Button
@@ -180,4 +181,19 @@
             android:layout_height="80dp"
             android:layout_margin="8dp"/>
     </GridLayout>
+
+    <TextView
+        android:id="@+id/regiusLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:padding="8dp"
+        android:text="@string/developer_powered_by"
+        android:textColor="@color/yellow"
+        android:textSize="14sp"
+        android:clickable="true"
+        android:focusable="true"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent" />
 </androidx.constraintlayout.widget.ConstraintLayout>

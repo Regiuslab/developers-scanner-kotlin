@@ -5,6 +5,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <!-- Warehouse TSD client. Developed by RegiusLab — https://regiuslab.by/ -->
     <application
         android:name=".MyApplication"
         android:allowBackup="true"

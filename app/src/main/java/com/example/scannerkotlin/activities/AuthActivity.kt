@@ -4,11 +4,13 @@ import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import android.widget.ImageView
+import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.example.scannerkotlin.R
 import com.example.scannerkotlin.dto.UserCredentials
+import com.example.scannerkotlin.utils.DeveloperCredits
 import com.example.scannerkotlin.utils.SessionManager
 import com.example.scannerkotlin.service.UserService
 import com.example.scannerkotlin.utils.AppUserRoles
@@ -66,6 +68,9 @@ class AuthActivity : AppCompatActivity() {
             findViewById(R.id.dot4)
         )
         setupKeypadButtons()
+        findViewById<TextView>(R.id.regiusLabel).setOnClickListener {
+            DeveloperCredits.showAboutDialog(this)
+        }
     }
 
     private fun setupKeypadButtons() {

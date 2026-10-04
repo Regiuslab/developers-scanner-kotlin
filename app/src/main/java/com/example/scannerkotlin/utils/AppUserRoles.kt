@@ -1,6 +1,8 @@
 package com.example.scannerkotlin.utils
 
+import com.example.scannerkotlin.config.BitrixConfig
+
 object AppUserRoles {
-    const val storekeeper = "75"
-    const val otk = "76"
+    val storekeeper: String get() = BitrixConfig.roleStorekeeper
+    val otk: String get() = BitrixConfig.roleOtk
 }

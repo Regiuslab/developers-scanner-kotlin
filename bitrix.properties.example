@@ -1,0 +1,23 @@
+# Скопируйте в bitrix.properties (файл в .gitignore) и подставьте значения портала.
+# Затем: ./gradlew clean assembleDebug
+#
+# Приоритет: local.properties > bitrix.properties > defaults в app/build.gradle.kts
+
+# Портал Bitrix24
+bitrix.host=bitrix.izocom.by
+bitrix.rest.userId=1
+
+# Входящие вебхуки (только token-часть URL /rest/{userId}/{token}/)
+bitrix.webhook.catalog=o2deu7wx7zfl3ib4
+bitrix.webhook.barcode.scan=c953o6imkob2gpwd
+bitrix.webhook.barcode.coming=sh1lchx64vrzcor6
+
+# Идентификаторы портала (списки / роли / каталог)
+bitrix.iblock.pin=18
+bitrix.iblock.products=14
+bitrix.iblock.offers=15
+bitrix.role.storekeeper=75
+bitrix.role.otk=76
+
+# Отображаемое имя тенанта (для логов / отладки)
+bitrix.tenant.name=izocom
