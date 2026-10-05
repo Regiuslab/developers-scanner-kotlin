@@ -25,6 +25,7 @@
 | 7 | Приход СГП | ![СГП](demo-director/07-sgp.png) | Экран проведения СГП |
 | 8 | ОТК | ![ОТК](demo-director/08-otk.png) | Роль ОТК: скан процесса качества |
 | 9 | Документ перемещения (позиции) | ![Перемещение](demo-director/09-moving-products.png) | Карточка позиций / пустой список до скана |
+| 10 | О разработчике («Разработано в RegiusLab») | ![О разработчике](demo-director/10-developer-about.png) | Диалог по тапу на подпись внизу PIN / меню |
 
 Копии ключевых экранов для README: `design-auth-480x800.png`, `design-main-480x800.png`, `design-coming-480x800.png`.
 
