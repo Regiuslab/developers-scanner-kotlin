@@ -182,9 +182,13 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
 
     @SuppressLint("NotifyDataSetChanged")
     private fun setupRecyclerView() {
-        // Keep original vertical paging. With fillViewport=false and a compact card,
-        // NestedScrollView only intercepts when content actually overflows.
+        // Vertical page snap: each adapter item is forced to RV height
+        // so product and comment never share one viewport.
         recyclerView.layoutManager = LinearLayoutManager(this)
+        recyclerView.setHasFixedSize(true)
+        recyclerView.itemAnimator = null
+        recyclerView.clipToPadding = true
+        recyclerView.clipChildren = true
 
         adapter = ProductComingAdapter(
             productList,
@@ -207,6 +211,16 @@ class ProductsDocumentComingActivity : BaseScanActivity(), OnItemClickListener {
         recyclerView.adapter = adapter
 
         adapter.setRecyclerView(recyclerView)
+
+        // When RV gets its real height after first layout, refresh page item heights.
+        var lastRvHeight = 0
+        recyclerView.addOnLayoutChangeListener { v, _, _, _, _, _, _, _, _ ->
+            val h = v.height
+            if (h > 0 && h != lastRvHeight && adapter.itemCount > 0) {
+                lastRvHeight = h
+                adapter.notifyDataSetChanged()
+            }
+        }
 
         val snapHelper = PagerSnapHelper()
         snapHelper.attachToRecyclerView(recyclerView)

@@ -16,25 +16,27 @@
         android:gravity="center_vertical"
         tools:ignore="UseCompoundDrawables">
 
-        <TextView
+        <com.example.scannerkotlin.ui.SlowMarqueeTextView
             android:id="@+id/tvProductName"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginEnd="8dp"
             android:text="Фитинг обжимной под сварку сталь с патрубком офланц (фланец сталь L=300мм) (в комплекте со стальной гильзой обжимной) 58,5х4,0 А-РЕ-Х- ТУ ВУ 59036744"
-            tools:text="Товар1 с очень длинным названием в несколько строк для проверки переноса и высоты"
+            tools:text="Товар1 с очень длинным названием для проверки медленной прокрутки"
             android:textColor="@color/white"
             android:textSize="22sp"
-        android:textStyle="bold"
-        android:layout_weight="1" />
+            android:textStyle="bold"
+            android:layout_weight="1"
+            android:clipToPadding="true" />
 
         <ImageView
             android:id="@+id/btnDelete"
-            android:layout_width="36dp"
-        android:layout_height="36dp"
-        android:src="@android:drawable/ic_delete"
-        android:padding="8dp"
-        app:tint="@android:color/holo_red_dark"
-        tools:ignore="ContentDescription" />
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/ic_delete"
+            android:padding="8dp"
+            app:tint="@android:color/holo_red_dark"
+            tools:ignore="ContentDescription" />
     </LinearLayout>
 
     <!-- Space 1 -->

@@ -115,16 +115,44 @@ class ProductComingAdapter(
             VIEW_TYPE_PRODUCT -> {
                 val view = LayoutInflater.from(parent.context)
                     .inflate(R.layout.item_coming_product, parent, false)
+                applyFullPageLayoutParams(view, parent)
                 ProductViewHolder(view)
             }
             VIEW_TYPE_COMMENT -> {
                 val view = LayoutInflater.from(parent.context)
                     .inflate(R.layout.item_document_comment, parent, false)
+                applyFullPageLayoutParams(view, parent)
                 CommentViewHolder(view, onCommentChanged)
             }
             else -> throw IllegalArgumentException("Invalid view type: $viewType")
         }
+    }
 
+    /**
+     * PagerSnapHelper pages must be exactly the RecyclerView height.
+     * Plain MATCH_PARENT is often treated as wrap_content on the scroll axis,
+     * which stacks product + comment in one viewport (the "broken layout" look).
+     */
+    private fun applyFullPageLayoutParams(itemView: View, parent: ViewGroup) {
+        val pageHeight = when {
+            parent.height > 0 -> parent.height
+            parent.measuredHeight > 0 -> parent.measuredHeight
+            else -> ViewGroup.LayoutParams.MATCH_PARENT
+        }
+        itemView.layoutParams = RecyclerView.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            pageHeight
+        )
+    }
+
+    private fun ensureFullPageHeight(holder: RecyclerView.ViewHolder) {
+        val rv = recyclerView ?: return
+        if (rv.height <= 0) return
+        val lp = holder.itemView.layoutParams as? RecyclerView.LayoutParams ?: return
+        if (lp.height != rv.height) {
+            lp.height = rv.height
+            holder.itemView.layoutParams = lp
+        }
     }
 
 
@@ -147,6 +175,7 @@ class ProductComingAdapter(
 
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        ensureFullPageHeight(holder)
         when (holder.itemViewType) {
             VIEW_TYPE_PRODUCT -> {
                 if (position >= 0 && position < productList.size) {

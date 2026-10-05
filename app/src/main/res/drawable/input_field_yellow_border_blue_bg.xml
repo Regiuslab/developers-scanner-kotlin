@@ -5,27 +5,15 @@
         <shape android:shape="rectangle">
             <solid android:color="@color/field_blue"/>
             <corners android:radius="12dp"/>
-
-            <stroke android:width="2.5dp" android:color="@color/glowing_yellow"/>
-            <padding
-                android:left="10dp"
-                android:right="10dp"
-                android:top="8dp"
-                android:bottom="8dp"/>
+            <stroke android:width="1.5dp" android:color="@color/glowing_yellow"/>
         </shape>
     </item>
-
 
     <item>
         <shape android:shape="rectangle">
             <solid android:color="@color/field_blue"/>
             <corners android:radius="12dp"/>
-            <stroke android:width="1dp" android:color="@color/yellow"/>
-            <padding
-                android:left="10dp"
-                android:right="10dp"
-                android:top="8dp"
-                android:bottom="8dp"/>
+            <stroke android:width="1.5dp" android:color="@color/stroke_muted"/>
         </shape>
     </item>
 </selector>

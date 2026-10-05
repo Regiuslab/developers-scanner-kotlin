@@ -1,8 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
     <style name="Base.Theme.ScannerKotlin" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/yellow</item>
+        <item name="colorOnPrimary">@color/dark_blue</item>
+        <item name="colorSecondary">@color/surface_elevated</item>
+        <item name="colorSurface">@color/field_blue</item>
+        <item name="android:colorBackground">@color/dark_blue</item>
+        <item name="android:statusBarColor">@color/dark_blue</item>
+        <item name="android:navigationBarColor">@color/dark_blue</item>
+        <item name="android:windowBackground">@color/dark_blue</item>
+        <item name="android:textColorPrimary">@color/white</item>
+        <item name="android:textColorSecondary">@color/gray</item>
+        <item name="materialAlertDialogTheme">@style/MyCustomMaterialAlertDialogStyle</item>
     </style>
 
     <style name="Theme.ScannerKotlin" parent="Base.Theme.ScannerKotlin" />

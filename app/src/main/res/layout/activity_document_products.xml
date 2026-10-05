@@ -20,10 +20,11 @@
             android:id="@+id/mainTitle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textStyle="bold"
+            android:fontFamily="sans-serif-medium"
             android:text="@string/documentComingType"
-            android:textColor="@color/yellow"/>
+            android:textColor="@color/white"/>
 
         <LinearLayout
             android:layout_width="match_parent"
@@ -93,10 +94,11 @@
             android:minHeight="@dimen/coming_button_min_height"
             android:backgroundTint="@color/field_blue"
             android:text="@string/btnAddProduct"
+            android:textColor="@color/white"
             tools:ignore="ButtonStyle"
             app:strokeColor="@color/yellow"
-            app:strokeWidth="2dp"
-            app:cornerRadius="1000dp"/>
+            app:strokeWidth="1.5dp"
+            app:cornerRadius="16dp"/>
 
         <Button
             android:id="@+id/btnSave"
@@ -105,12 +107,13 @@
             android:layout_marginStart="8dp"
             android:layout_weight="1"
             android:minHeight="@dimen/coming_button_min_height"
-            android:backgroundTint="@color/gray"
+            android:backgroundTint="@color/surface_elevated"
             android:text="@string/btnSave"
+            android:textColor="@color/white"
             tools:ignore="ButtonStyle"
-            app:strokeColor="@color/yellow"
-            app:strokeWidth="2dp"
-            app:cornerRadius="1000dp"/>
+            app:strokeColor="@color/stroke_muted"
+            app:strokeWidth="1.5dp"
+            app:cornerRadius="16dp"/>
     </LinearLayout>
 
 </RelativeLayout>

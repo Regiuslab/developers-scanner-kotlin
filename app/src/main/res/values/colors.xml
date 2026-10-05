@@ -1,19 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
+    <color name="white">#FFF8FAFC</color>
     <color name="blue">#215CF3</color>
-    <color name="holo_red_dark">#FD1103</color>
-    <color name="green">#4CAF50</color>
-    <color name="red">#FF4444</color>
-    <color name="dark_green">#388E3C</color>
-    <color name="dark_blue">#050E64</color>
-    <color name="dark_red">#5B0A00</color>
-    <color name="light_gray">#CEC5C5</color>
-    <color name="barcode">#E5E4E4</color>
-    <color name="gray">#BEBABA</color>
-    <color name="yellow">#EBA308</color>
-    <color name="field_blue">#030A4A</color>
-    <color name="hint_white">#B3FFFFFF</color>
-    <color name="glowing_yellow">#FFFFE0</color>
+    <color name="holo_red_dark">#F87171</color>
+    <color name="green">#34D399</color>
+    <color name="red">#F87171</color>
+    <color name="dark_green">#059669</color>
+
+    <!-- Industrial Modern palette (resource names kept for layout compatibility) -->
+    <color name="dark_blue">#FF0F172A</color>
+    <color name="field_blue">#FF1E293B</color>
+    <color name="yellow">#FFF59E0B</color>
+    <color name="glowing_yellow">#FFFBBF24</color>
+    <color name="gray">#FF94A3B8</color>
+    <color name="light_gray">#FFCBD5E1</color>
+    <color name="hint_white">#B3F8FAFC</color>
+    <color name="barcode">#FFE2E8F0</color>
+    <color name="dark_red">#FF7F1D1D</color>
+
+    <color name="surface_elevated">#FF334155</color>
+    <color name="stroke_muted">#FF475569</color>
 </resources>

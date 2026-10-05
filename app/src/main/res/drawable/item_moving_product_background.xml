@@ -1,14 +1,9 @@
-<!-- res/drawable/item_moving_product_background.xml -->
+<?xml version="1.0" encoding="utf-8"?>
 <shape xmlns:android="http://schemas.android.com/apk/res/android"
     android:shape="rectangle">
-
-    <solid android:color="@color/dark_blue" />
-
+    <solid android:color="@color/field_blue" />
     <stroke
         android:width="1.5dp"
-    android:color="@color/yellow" />
-
-
-     <corners android:radius="8dp" />
-
+        android:color="@color/stroke_muted" />
+    <corners android:radius="16dp" />
 </shape>

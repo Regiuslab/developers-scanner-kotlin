@@ -1,13 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.core.widget.NestedScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="false"
-    android:overScrollMode="ifContentScrolls"
-    android:scrollbars="vertical"
-    android:clipToPadding="false">
+    android:background="@color/dark_blue"
+    android:clipChildren="true"
+    android:clipToPadding="true">
 
     <LinearLayout
         android:id="@+id/comingProductCard"
@@ -17,29 +16,28 @@
         android:paddingHorizontal="@dimen/coming_card_padding_horizontal"
         android:paddingVertical="@dimen/coming_card_padding_vertical"
         android:background="@drawable/item_yellow_border_dark_bg"
-        android:layout_marginBottom="@dimen/coming_card_margin_bottom">
+        android:layout_marginBottom="@dimen/coming_card_margin_bottom"
+        android:clipChildren="true"
+        android:clipToPadding="true">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
-            android:gravity="center_vertical">
+            android:gravity="center_vertical"
+            android:clipChildren="true">
 
-            <TextView
+            <com.example.scannerkotlin.ui.SlowMarqueeTextView
                 android:id="@+id/tvProductName"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:layout_marginEnd="4dp"
                 android:text="Товар1"
                 android:textSize="@dimen/coming_product_name_text"
                 android:textStyle="bold"
                 android:textColor="@color/white"
-                android:maxLines="3"
-                android:ellipsize="end"
-                android:clickable="false"
-                android:focusable="false"
-                android:focusableInTouchMode="false"/>
+                tools:text="Труба ст20 76х12 ГОСТ 8732-78 бесшовная горячедеформированная" />
 
             <ImageButton
                 android:id="@+id/btnCopy"
@@ -47,7 +45,7 @@
                 android:layout_height="@dimen/coming_action_button_size"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:padding="@dimen/coming_action_button_padding"
-                app:srcCompat="@drawable/abc_ic_menu_copy_mtrl_am_alpha"
+                app:srcCompat="@drawable/ic_copy"
                 app:tint="@color/yellow"
                 tools:ignore="ContentDescription" />
 
@@ -57,7 +55,7 @@
                 android:layout_height="@dimen/coming_action_button_size"
                 android:background="?attr/selectableItemBackgroundBorderless"
                 android:padding="@dimen/coming_action_button_padding"
-                app:srcCompat="@drawable/ic_delete_red"
+                app:srcCompat="@drawable/ic_close"
                 app:tint="@color/holo_red_dark"
                 tools:ignore="ContentDescription" />
         </LinearLayout>
@@ -65,80 +63,95 @@
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
-            android:layout_marginTop="@dimen/coming_row_margin_top">
+            android:layout_marginTop="@dimen/coming_row_margin_top"
+            android:baselineAligned="false"
+            android:gravity="center_vertical"
+            android:clipChildren="true">
 
             <EditText
                 android:id="@+id/etQuantity"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:minHeight="@dimen/coming_field_min_height"
+                android:layout_height="@dimen/coming_field_min_height"
                 android:layout_weight="1"
+                android:layout_marginEnd="@dimen/coming_field_gap"
+                android:minWidth="0dp"
                 android:inputType="number"
                 android:hint="Количество"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
                 android:textSize="@dimen/coming_field_text"
                 android:gravity="center"
+                android:paddingHorizontal="10dp"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
-                android:paddingHorizontal="12dp"
-                android:layout_marginEnd="8dp" />
+                android:includeFontPadding="false" />
 
-            <Spinner
-                android:id="@+id/spinnerMeasure"
+            <FrameLayout
                 android:layout_width="0dp"
                 android:layout_height="@dimen/coming_field_min_height"
                 android:layout_weight="1"
+                android:minWidth="0dp"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
-                android:paddingHorizontal="12dp"
-                android:textAlignment="center" />
+                android:clipChildren="true">
+
+                <Spinner
+                    android:id="@+id/spinnerMeasure"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@android:color/transparent"
+                    android:paddingHorizontal="8dp"
+                    android:spinnerMode="dropdown"
+                    android:textAlignment="center" />
+            </FrameLayout>
         </LinearLayout>
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
-            android:layout_marginTop="@dimen/coming_row_margin_top">
+            android:layout_marginTop="@dimen/coming_row_margin_top"
+            android:baselineAligned="false"
+            android:gravity="center_vertical"
+            android:clipChildren="true">
 
             <EditText
                 android:id="@+id/etDiameter"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:minHeight="@dimen/coming_field_min_height"
+                android:layout_height="@dimen/coming_field_min_height"
                 android:layout_weight="1"
+                android:layout_marginEnd="@dimen/coming_field_gap"
+                android:minWidth="0dp"
                 android:inputType="numberDecimal"
                 android:hint="Диаметр"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
                 android:textSize="@dimen/coming_field_text"
                 android:gravity="center"
+                android:paddingHorizontal="10dp"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
-                android:paddingHorizontal="12dp"
-                android:layout_marginEnd="8dp" />
+                android:includeFontPadding="false" />
 
             <EditText
                 android:id="@+id/etWeight"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:minHeight="@dimen/coming_field_min_height"
+                android:layout_height="@dimen/coming_field_min_height"
                 android:layout_weight="1"
+                android:minWidth="0dp"
                 android:inputType="numberDecimal"
                 android:hint="Вес"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
                 android:textSize="@dimen/coming_field_text"
                 android:gravity="center"
+                android:paddingHorizontal="10dp"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
-                android:paddingHorizontal="12dp" />
+                android:includeFontPadding="false" />
         </LinearLayout>
 
         <EditText
             android:id="@+id/etWallThickness"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/coming_field_min_height"
+            android:layout_height="@dimen/coming_field_min_height"
             android:layout_marginTop="@dimen/coming_row_margin_top"
             android:inputType="numberDecimal"
             android:hint="Толщина стенки"
@@ -146,64 +159,63 @@
             android:textColorHint="@color/hint_white"
             android:textSize="@dimen/coming_field_text"
             android:gravity="center"
+            android:paddingHorizontal="10dp"
             android:background="@drawable/input_field_yellow_border_blue_bg"
-            android:paddingHorizontal="12dp" />
+            android:includeFontPadding="false" />
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:minHeight="@dimen/coming_field_min_height"
             android:orientation="horizontal"
-            android:layout_marginTop="@dimen/coming_row_margin_top">
+            android:gravity="center_vertical"
+            android:layout_marginTop="@dimen/coming_row_margin_top"
+            android:baselineAligned="false"
+            android:clipChildren="true">
 
             <EditText
                 android:id="@+id/etBatchNumber"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:minHeight="@dimen/coming_field_min_height"
+                android:layout_height="@dimen/coming_field_min_height"
                 android:layout_weight="1"
+                android:layout_marginEnd="@dimen/coming_field_gap"
+                android:minWidth="0dp"
                 android:hint="Партия"
                 android:textSize="@dimen/coming_field_text"
                 android:textColor="@color/white"
                 android:textColorHint="@color/hint_white"
+                android:paddingHorizontal="10dp"
                 android:background="@drawable/input_field_yellow_border_blue_bg"
-                android:paddingHorizontal="12dp"
+                android:includeFontPadding="false"
                 tools:ignore="Autofill,TextFields" />
 
             <CheckBox
                 android:id="@+id/cbOldProduct"
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:minHeight="@dimen/coming_field_min_height"
+                android:layout_height="@dimen/coming_field_min_height"
                 android:layout_weight="1"
+                android:minWidth="0dp"
                 android:text="Старая продукция"
                 android:textColor="@color/white"
                 android:buttonTint="@color/yellow"
+                android:paddingStart="4dp"
                 android:gravity="center_vertical" />
         </LinearLayout>
 
-        <LinearLayout
-            android:id="@+id/barcodeSection"
+        <EditText
+            android:id="@+id/tvBarcode"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:minHeight="@dimen/coming_field_min_height"
-            android:orientation="horizontal"
+            android:layout_height="@dimen/coming_field_min_height"
             android:layout_marginTop="@dimen/coming_row_margin_top"
-            android:layout_marginBottom="@dimen/coming_barcode_section_margin_bottom">
-
-            <EditText
-                android:id="@+id/tvBarcode"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:minHeight="@dimen/coming_field_min_height"
-                android:hint="Штрихкод"
-                android:textSize="@dimen/coming_field_text"
-                android:textColor="@color/white"
-                android:textColorHint="@color/hint_white"
-                android:background="@drawable/input_field_yellow_border_blue_bg"
-                android:paddingHorizontal="12dp"
-                tools:ignore="Autofill,TextFields" />
-        </LinearLayout>
+            android:layout_marginBottom="@dimen/coming_barcode_section_margin_bottom"
+            android:hint="Штрихкод"
+            android:textSize="@dimen/coming_field_text"
+            android:textColor="@color/white"
+            android:textColorHint="@color/hint_white"
+            android:paddingHorizontal="10dp"
+            android:gravity="center_vertical"
+            android:background="@drawable/input_field_yellow_border_blue_bg"
+            android:includeFontPadding="false"
+            tools:ignore="Autofill,TextFields" />
 
         <TextView
             android:id="@+id/tvBarcodeError"
@@ -216,4 +228,4 @@
             android:paddingBottom="4dp"
             android:visibility="gone"/>
     </LinearLayout>
-</androidx.core.widget.NestedScrollView>
+</FrameLayout>
