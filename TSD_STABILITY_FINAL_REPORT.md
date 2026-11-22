@@ -160,7 +160,7 @@
 |---|---|---|---|
 | **RG-01** | Авторизация по PIN и отсутствие утечки секретов в логи | **PASS** | `RegressionAndSecuritySuiteTest` (`UserService`, `TsdLogger` redaction) + холодный старт `AuthActivity` на эмуляторе |
 | **RG-02** | Миграция локальной БД `v1 → v2` при обновлении приложения | **PASS** | `SqlitePersistenceAndMigrationInstrumentedTest.sqliteSchemaMigrationV1ToV2PreservesAllDraftsAndItems` на Android 17 |
-| **RG-03** | Перемещения, остатки, мапперы документов и номенклатуры | **PASS** | Существующие и новые тесты (`MovingConductRetrySyncTest`, `MovingDocumentStateMergerTest`, `MovingAvailabilityDisplayTest`, `ComingProductValidatorTest`, `RegressionAndSecuritySuiteTest`) — всего **53/53 JVM unit-тестов PASS** (прогон 22.11.2026 вечер). Повторный `connectedDebugAndroidTest` в этой итерации: **NOT RUN** (ADB: ни одного устройства) |
+| **RG-03** | Перемещения, остатки, мапперы документов и номенклатуры | **PASS** | Существующие и новые тесты (`MovingConductRetrySyncTest`, `MovingDocumentStateMergerTest`, `MovingAvailabilityDisplayTest`, `ComingProductValidatorTest`, `RegressionAndSecuritySuiteTest`) — всего **59/59 JVM unit-тестов PASS** (прогон 22.11.2026, финальная стабилизация). Повторный `connectedDebugAndroidTest` в этой итерации: **NOT RUN** (ADB: ни одного устройства) |
 | **RG-04** | Сборка `Debug` и `Release` APK + `lintVitalRelease` | **PASS** | `.\gradlew.bat testDebugUnitTest assembleDebug assembleRelease compileDebugAndroidTestKotlin` — `BUILD SUCCESSFUL` |
 | **RG-05** | Физический лазерный сканер Xcheng и живой Staging Битрикс24 | **NOT RUN** | Нет физического ТСД и отдельного непроизводственного портала Битрикс24 в среде разработки |
 
@@ -213,7 +213,7 @@
 
 ## 17.8. Оставшиеся риски и ограничения
 
-1. **Отсутствие серверной транзакционности REST API Битрикс24 (внешний контур):** серверный модуль Битрикс находится вне данного репозитория. Если два сотрудника на двух разных ТСД одновременно сканируют **один и тот же новый (ранее не существовавший)** штрихкод и нажимают «Провести» в одно миллисекундное окно в разных документах, стандартный метод `catalog.product.offer.add` Битрикс не блокирует создание второй вариации до вызова `barcode.setbyproductid.json`. На Android добавлена повторная пост-проверка владельца штрихкода при отказе `setBarcodeByProductId`, но для стопроцентной серверной защиты рекомендуется добавить на портале Битрикс небольшой REST-обработчик с серверной блокировкой (`GET_LOCK` / уникальный индекс по штрихкоду и `operationId`).
+1. **Отсутствие серверной транзакционности REST API Битрикс24 (внешний контур):** серверный модуль отсутствует в этом репозитории, поэтому клиент **не имитирует** серверные `GET_LOCK`. Контракт для портала: `BITRIX_TSD_SERVER_LOCK_SPEC.md`. Клиент сужает окно гонки (повторный lookup штрихкода, повторный `element.list` перед add, сверка `status=Y` до `conduct`). Тесты `CX-01`/`CX-02` **намеренно** показывают, что без уникальных ограничений на портале возможны вторая вариация и дубль строки документа.
 2. **Не выполнялись проверки на физическом устройстве ТСД Xcheng (`CR-03`, физический лазер):** аппаратный декодер Xcheng и физическая перезагрузка ОС ТСД были смоделированы на Android-эмуляторе (`480x800 240dpi`) через штатные broadcast-сообщения `com.xcheng.scanner.action.BARCODE_DECODING_BROADCAST` и принудительное завершение процесса (`SIGKILL` / `am force-stop`).
 3. **Не выполнялось проведение на живом портале Битрикс:** в проекте сконфигурирован только боевой хост `bitrix.izocom.by`; в соответствии с разделом 13 ТЗ стресс- и разрушительные тесты на production-базе не запускались.
 4. **Секреты по умолчанию в `app/build.gradle.kts`:** в `build.gradle.kts` присутствуют исторические дефолтные значения webhook-ключей (`bitrixProp(...)`). Логгер теперь надёжно маскирует их в логах, однако перед production-выпуском рекомендуется перевыпустить вебхуки в Битрикс24 и передавать их исключительно через `local.properties` / секреты CI.
@@ -232,6 +232,7 @@
    - отсканировать физическим лазером 50 товаров в документ прихода и перезагрузить ТСД кнопкой питания (`CR-03`), убедиться в автовосстановлении всех 50 позиций;
    - проверить проведение документа из 10 позиций с заведомо конфликтным штрихкодом на 10-й позиции, исправить её и провести документ повторно на staging-портале Битрикс, сверив отсутствие дублей вариаций и корректность складских остатков.
 3. Вынести боевые webhook-ключи из дефолтов `app/build.gradle.kts` в `bitrix.properties` / переменные окружения сборки и настроить релизную подпись APK (`signingConfig`).
+4. Внедрить на staging-портале обработчики из `BITRIX_TSD_SERVER_LOCK_SPEC.md` (`tsd.variation.resolveOrCreate`, `tsd.document.syncAndConduct`) и прогнать два физических ТСД на одном новом штрихкоде.
 
 ---
 
@@ -284,10 +285,10 @@
 
 | Проверка | Результат | Доказательство |
 |---|---|---|
-| `testDebugUnitTest` | **PASS** 53/53, 0 failed | Gradle XML `app/build/test-results/testDebugUnitTest/` (в т.ч. 14 тестов `CatalogDocumentComingServiceTest`) |
-| `assembleDebug` / `assembleRelease` | **PASS** | `BUILD SUCCESSFUL` |
+| `testDebugUnitTest` | **PASS** 59/59, 0 failed (прогон после CX-тестов) | Gradle XML `app/build/test-results/testDebugUnitTest/` |
+| `assembleDebug` / `assembleRelease` | **PASS** | `BUILD SUCCESSFUL` (release после снятия файловой блокировки dex) |
 | `connectedDebugAndroidTest` (новый атомарный SQLite-тест) | **NOT RUN** | `adb devices` пуст, эмулятор не подключён |
-| Стресс 100/500/1000 (JVM, повторный прогон в составе unit-тестов) | **PASS** | `ComingDraftPersistenceAndStressTest` 9/9 |
+| Стресс 100/500/1000 (JVM, повторный прогон в составе unit-тестов) | **PASS** | `ComingDraftPersistenceAndStressTest` включая parallel persist |
 | Стресс/миграция SQLite на эмуляторе (повтор этой итерации) | **NOT RUN** | нет устройства; предыдущий прогон 22.11 утром остаётся в силе |
 
 ### 6. Остаточные риски
@@ -298,3 +299,67 @@
 ### 7. Готовность
 
 **`READY FOR STAGING`** — без изменения. `READY FOR PILOT` по-прежнему требует физический ТСД и тестовый (не боевой) Битрикс.
+
+---
+
+## 17.11. Финальная стабилизация перед пилотом (конкуренция нескольких ТСД)
+
+### Исправленные / усиленные ошибки
+- Перед `catalog.document.conduct` выполняется повторная сверка статуса: если другой ТСД уже провёл документ (`status=Y`), клиент не вызывает проведение повторно.
+- Перед `offer.add` — повторный authoritative lookup штрихкода; после создания вариации — повторная проверка владельца. Чужой товар не перезаписывается.
+- Перед `element.add` — повторный `catalog.document.element.list`.
+- `Mutex` остаётся process-wide для одного ТСД; в тестах двух клиентов включается `isolateProcessLocks`, чтобы не маскировать межпроцессную гонку.
+- Серверная блокировка **не эмулируется** на Android. Контракт портала: `BITRIX_TSD_SERVER_LOCK_SPEC.md`.
+
+### Изменённые файлы
+- `CatalogDocumentComingService.kt` (`lockForDocument`, `saveProductVariationsInternal`, `syncDocumentElementsIdempotently`, `executeConductAndVerify`)
+- `CatalogDocumentComingServiceTest.kt` (`CX-01`…`CX-05`, гонки Mock API)
+- `ComingDraftPersistenceAndStressTest.kt` (параллельное сохранение разных штрихкодов)
+- `BITRIX_TSD_SERVER_LOCK_SPEC.md` (новый)
+- `TSD_STABILITY_FINAL_REPORT.md`
+
+### Конкурентные тесты (два независимых клиента, разные FileBacked хранилища, общий Mock)
+
+| ID | Сценарий | Результат | Итоговое состояние сервера |
+|---|---|---|---|
+| **CX-01** | Два ТСД, один новый штрихкод, два документа | **PASS** | 1 привязка штрихкода, оба документа `Y`, чужие parentId не затронуты. `offer.add` может быть >1 — ограничение API **зафиксировано**, не спрятано |
+| **CX-02** | Два ТСД проводят один документ | **PASS** | Итоговый `status=Y` один раз (повторный `conduct` отклоняется). Дубль строки элемента возможен без `UNIQUE(docId,elementId)` — ограничение **выявлено** |
+| **CX-03** | TSD-B проверяет штрихкод после создания TSD-A | **PASS** | Победивший `offerId` переиспользован, `offerAddCalls=1` |
+| **CX-04** | Тайм-аут после фактического conduct, второй ТСД повторяет | **PASS** | `conductCalls=1`, второй клиент `reconciledAlreadyConducted` |
+| **CX-05** | Устаревший кэш штрихкода на чужой offerId | **PASS** | Конфликт, `offerUpdate=0`, документ не проведён |
+
+Полная атомарность двух физических ТСД **не заявлена**.
+
+### Стресс (повторный прогон JVM в этом цикле)
+
+| Сценарий | Результат |
+|---|---|
+| 100 / 500 / 1000 последовательных сканирований + cold restart с диска | **PASS**, потерь 0 |
+| Быстрый повтор одного штрихкода + 50 атомарных +1 | **PASS** |
+| 40 параллельных разных штрихкодов | **PASS**, 40/40, дублей 0 |
+| Офлайн (локальное сохранение без сети) | **PASS** (диск, интернет не требуется) |
+| Потеря сети во время проведения | **PASS** (`CX-04`, `IC-09`, `RV-03`…`RV-06`) |
+| Принудительное завершение процесса / холодный старт | **PASS** (JVM FileBacked; Android `kill -9` в этом цикле **NOT RUN**) |
+| Перезагрузка устройства | **NOT RUN** (нет физического ТСД) |
+| Android instrumentation | **NOT RUN** (`adb devices` пуст) |
+
+Падения в прогнанных JVM-тестах: **0**. Потерянные сканирования в прогнанных persist-тестах: **0**.
+
+### Сборка APK
+- `assembleDebug`: **BUILD SUCCESSFUL**
+- `assembleRelease` + `lintVitalRelease`: **BUILD SUCCESSFUL**
+
+### Чек-лист на физическом ТСД (staging, не production)
+
+1. Установить release APK на два Xcheng.
+2. Один новый штрихкод: оба нажимают «Провести» почти одновременно → в Битрикс одна вариация, один штрихкод, чужие карточки без изменений.
+3. Один документ: оба проводят → `status=Y` один раз, остатки не удвоены.
+4. 50 сканов → перезагрузка кнопкой питания → все 50 на месте.
+5. Офлайн-сканирование 10 позиций → сеть вернулась → проведение без потери списка.
+6. После внедрения `BITRIX_TSD_SERVER_LOCK_SPEC.md` повторить п.2–3.
+
+### Итоговая готовность
+
+**`READY FOR STAGING`**
+
+Не `READY FOR PILOT`: нет физического ТСД, нет серверных endpoint блокировки на портале, нет повторного instrumentation в этом цикле, production-Битрикс не использовался.

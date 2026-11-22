@@ -91,6 +91,37 @@ class ComingDraftPersistenceAndStressTest {
     }
 
     @Test
+    fun `ST-parallel different barcodes persist concurrently with zero loss`() = runBlocking {
+        val dir = tempFolder.newFolder("parallel_barcodes")
+        val repo = ComingDraftRepository(FileBackedDraftStorageEngine(dir))
+        val docId = 7100
+        val jobs = (1..40).map { i ->
+            async {
+                repo.saveAddedOrUpdatedItem(
+                    documentId = docId,
+                    documentTitle = "Приход parallel",
+                    destinationStoreId = 1,
+                    allowedNomenclatureIds = null,
+                    item = sampleProduct(
+                        id = 4000 + i,
+                        name = "Товар $i",
+                        barcode = String.format("4607100%05d", i),
+                        qty = 1.0
+                    ),
+                    insertAtTop = false
+                )
+            }
+        }
+        val outcomes = jobs.awaitAll()
+        assertTrue(outcomes.all { it is SaveOutcome.Saved })
+        val restarted = ComingDraftRepository(FileBackedDraftStorageEngine(dir))
+        val draft = restarted.getDraft(docId)
+        assertNotNull(draft)
+        assertEquals(40, draft!!.items.size)
+        assertEquals(40, draft.items.map { it.barcode }.toSet().size)
+    }
+
+    @Test
     fun `ST-04 and CR-05 burst deduplication and 50 concurrent atomic quantity increments preserve exact sum`() = runBlocking {
         val dedup = HardwareScanBurstDeduplicator(hardwareBurstWindowMs = 180L)
         assertTrue(dedup.shouldAccept("4600000000001", nowMs = 1_000L))

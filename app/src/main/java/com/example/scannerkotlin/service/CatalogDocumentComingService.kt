@@ -43,7 +43,12 @@ import java.util.concurrent.ConcurrentHashMap
 class CatalogDocumentComingService(
     private var apiBitrix: ApiBitrix = BitrixClientFactory.catalogApi(),
     private var apiBarcode: ApiBitrix = BitrixClientFactory.barcodeComingApi(),
-    private val draftRepository: ComingDraftRepository = ComingDraftRepository.getInstance()
+    private val draftRepository: ComingDraftRepository = ComingDraftRepository.getInstance(),
+    /**
+     * When true, document Mutex lives on this instance only. Used by two-TSD tests so they do not
+     * accidentally share process-wide locks (physical devices never share this Mutex).
+     */
+    private val isolateProcessLocks: Boolean = false
 ) {
     private val documentMapper = DocumentMapper()
     private val documentElementsMapper = DocumentElementMapper()
@@ -51,10 +56,13 @@ class CatalogDocumentComingService(
 
     companion object {
         private val documentConductLocks = ConcurrentHashMap<Int, Mutex>()
+    }
 
-        private fun lockForDocument(documentId: Int): Mutex {
-            return documentConductLocks.getOrPut(documentId) { Mutex() }
-        }
+    private val instanceConductLocks = ConcurrentHashMap<Int, Mutex>()
+
+    private fun lockForDocument(documentId: Int): Mutex {
+        val table = if (isolateProcessLocks) instanceConductLocks else documentConductLocks
+        return table.getOrPut(documentId) { Mutex() }
     }
 
     sealed class BarcodeLookupOutcome {
@@ -1127,6 +1135,29 @@ class CatalogDocumentComingService(
                 continue
             }
 
+            // Re-read server rows immediately before add to shrink the two-TSD race window.
+            val latestElements = fetchServerDocumentElements(idDocument)
+            val racedMatch = latestElements?.firstOrNull { el ->
+                el.id != null && el.elementId == offerElementId
+            }
+            if (racedMatch?.id != null) {
+                currentProduct.idInDocument = racedMatch.id
+                draftRepository.recordItemStepProgress(
+                    documentId = idDocument,
+                    operationId = operationId,
+                    localItemId = currentProduct.localItemId,
+                    offerId = offerElementId,
+                    idInDocument = racedMatch.id,
+                    itemStatus = ComingItemStatus.ELEMENT_ADDED,
+                    syncState = ComingSyncState.REMOTE_ELEMENT_CREATED,
+                    stepType = "ADD_ELEMENT",
+                    stepStatus = "SKIPPED_REUSED",
+                    remoteEntityId = racedMatch.id,
+                    details = "Matched existing row on last-second refetch offerId=$offerElementId"
+                )
+                continue
+            }
+
             // Element not yet in Bitrix document -> add it once
             val addReq = AddDocumentElementRequest(
                 fields = mutableMapOf(
@@ -1209,6 +1240,57 @@ class CatalogDocumentComingService(
             stepType = "CONDUCT_DOCUMENT",
             status = "STARTED"
         )
+
+        when (val preConduct = fetchAuthoritativeDocumentStatus(idDocument)) {
+            is DocumentServerStatus.Found -> {
+                if (preConduct.document.status?.uppercase() == "Y") {
+                    CatalogReferenceCache.invalidateStores()
+                    draftRepository.markCommittedAndFinalize(idDocument, operationId)
+                    return@withContext ConductResult(
+                        isSuccess = true,
+                        message = "Сверка перед проведением: документ №$idDocument уже проведён другим ТСД. Повторное проведение не выполнялось.",
+                        state = ComingOperationState.COMMITTED,
+                        operationId = operationId,
+                        reconciledAlreadyConducted = true
+                    )
+                }
+            }
+            is DocumentServerStatus.Unverified -> {
+                val msg = "Не удалось достоверно подтвердить статус документа №$idDocument перед проведением. Изменяющая операция заблокирована до сверки."
+                draftRepository.transitionState(
+                    documentId = idDocument,
+                    newState = ComingOperationState.RECONCILIATION_REQUIRED,
+                    syncState = ComingSyncState.SYNC_ERROR,
+                    errorMessage = msg
+                )
+                return@withContext ConductResult(
+                    isSuccess = false,
+                    message = msg,
+                    state = ComingOperationState.RECONCILIATION_REQUIRED,
+                    operationId = operationId
+                )
+            }
+            is DocumentServerStatus.NetworkFailure -> {
+                val msg = "Нет связи для проверки статуса документа №$idDocument перед проведением (${preConduct.message}). Требуется сверка."
+                draftRepository.transitionState(
+                    documentId = idDocument,
+                    newState = ComingOperationState.RECONCILIATION_REQUIRED,
+                    syncState = ComingSyncState.SYNC_ERROR,
+                    errorMessage = msg
+                )
+                return@withContext ConductResult(
+                    isSuccess = false,
+                    message = msg,
+                    state = ComingOperationState.RECONCILIATION_REQUIRED,
+                    operationId = operationId
+                )
+            }
+            is DocumentServerStatus.NotFound -> {
+                val msg = "Документ №$idDocument не найден в Битрикс перед проведением."
+                draftRepository.transitionState(idDocument, ComingOperationState.FAILED, ComingSyncState.SYNC_ERROR, msg)
+                return@withContext ConductResult(false, msg, ComingOperationState.FAILED, operationId)
+            }
+        }
 
         try {
             val response = apiBitrix.conductDocument(ConductDocumentRequest(idDocument))
@@ -1493,6 +1575,44 @@ class CatalogDocumentComingService(
                     }
                 }
 
+                // Last-second authoritative barcode lookup shrinks the two-TSD TOCTOU window.
+                // This is NOT a server lock — a remaining race is documented in BITRIX_TSD_SERVER_LOCK_SPEC.md.
+                if (offerIdToUse == null && !normalizedBarcode.isNullOrBlank()) {
+                    when (val freshLookup = lookupBarcodeAuthoritative(normalizedBarcode)) {
+                        is BarcodeLookupOutcome.Found -> {
+                            when (val ownership = verifyOfferBelongsToParent(freshLookup.productId, productOffer.parentId)) {
+                                is OfferOwnershipCheck.Compatible -> {
+                                    offerIdToUse = freshLookup.productId
+                                    productOffer.id = freshLookup.productId
+                                }
+                                is OfferOwnershipCheck.ForeignConflict -> {
+                                    return@withContext ConductResult.SaveResult.Failure(
+                                        errorMessage = "Позиция №$posNum (${productOffer.name}): штрихкод '$normalizedBarcode' уже принадлежит другому товару («${ownership.foreignName}», ID: ${freshLookup.productId}).",
+                                        failedPositionIndex = index,
+                                        isConflict = true,
+                                        requiresReconciliation = remoteMutationOccurredOrUncertain
+                                    )
+                                }
+                                is OfferOwnershipCheck.VerificationError -> {
+                                    return@withContext ConductResult.SaveResult.Failure(
+                                        errorMessage = "Позиция №$posNum: не удалось повторно проверить штрихкод '$normalizedBarcode' (${ownership.reason}).",
+                                        failedPositionIndex = index,
+                                        requiresReconciliation = remoteMutationOccurredOrUncertain
+                                    )
+                                }
+                            }
+                        }
+                        is BarcodeLookupOutcome.Error -> {
+                            return@withContext ConductResult.SaveResult.Failure(
+                                errorMessage = "Позиция №$posNum: ошибка повторной проверки штрихкода '$normalizedBarcode' (${freshLookup.message}).",
+                                failedPositionIndex = index,
+                                requiresReconciliation = remoteMutationOccurredOrUncertain
+                            )
+                        }
+                        is BarcodeLookupOutcome.NotFound -> Unit
+                    }
+                }
+
                 // Step 3: Create new variation only if none exists yet
                 if (offerIdToUse == null) {
                     when (val created = addVariationOfProductSuspend(productOffer)) {
@@ -1532,6 +1652,50 @@ class CatalogDocumentComingService(
                                     remoteEntityId = created.offerId,
                                     details = "Created offerId=${created.offerId} for parentId=${productOffer.parentId}"
                                 )
+                            }
+
+                            // If another TSD bound this barcode while we created an offer, reuse theirs
+                            // and do not overwrite the foreign/winning barcode mapping.
+                            if (!normalizedBarcode.isNullOrBlank()) {
+                                when (val raced = lookupBarcodeAuthoritative(normalizedBarcode)) {
+                                    is BarcodeLookupOutcome.Found -> {
+                                        if (raced.productId != created.offerId) {
+                                            when (val ownership = verifyOfferBelongsToParent(raced.productId, productOffer.parentId)) {
+                                                is OfferOwnershipCheck.Compatible -> {
+                                                    offerIdToUse = raced.productId
+                                                    productOffer.id = raced.productId
+                                                    TsdLogger.warn(
+                                                        category = "VARIATION",
+                                                        event = "concurrent_offer_reused_winning_barcode",
+                                                        operationId = operationId,
+                                                        documentId = documentId,
+                                                        fields = mapOf(
+                                                            "createdOfferId" to created.offerId,
+                                                            "winningOfferId" to raced.productId,
+                                                            "barcode" to normalizedBarcode
+                                                        )
+                                                    )
+                                                }
+                                                is OfferOwnershipCheck.ForeignConflict -> {
+                                                    return@withContext ConductResult.SaveResult.Failure(
+                                                        errorMessage = "Позиция №$posNum: штрихкод '$normalizedBarcode' уже принадлежит другому товару («${ownership.foreignName}», ID: ${raced.productId}). Вариация этого товара не изменялась.",
+                                                        failedPositionIndex = index,
+                                                        isConflict = true,
+                                                        requiresReconciliation = true
+                                                    )
+                                                }
+                                                is OfferOwnershipCheck.VerificationError -> {
+                                                    return@withContext ConductResult.SaveResult.Failure(
+                                                        errorMessage = "Позиция №$posNum: не удалось проверить владельца штрихкода после создания вариации (${ownership.reason}).",
+                                                        failedPositionIndex = index,
+                                                        requiresReconciliation = true
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                    else -> Unit
+                                }
                             }
                         }
                     }
