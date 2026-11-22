@@ -8,6 +8,7 @@ import androidx.appcompat.app.AlertDialog
 import com.example.scannerkotlin.api.ApiBitrix
 import com.example.scannerkotlin.cache.CatalogReferenceCache
 import com.example.scannerkotlin.config.BitrixClientFactory
+import com.example.scannerkotlin.config.BitrixConcurrencyMode
 import com.example.scannerkotlin.config.BitrixConfig
 import com.example.scannerkotlin.mappers.DocumentElementMapper
 import com.example.scannerkotlin.mappers.DocumentMapper
@@ -48,7 +49,13 @@ class CatalogDocumentComingService(
      * When true, document Mutex lives on this instance only. Used by two-TSD tests so they do not
      * accidentally share process-wide locks (physical devices never share this Mutex).
      */
-    private val isolateProcessLocks: Boolean = false
+    private val isolateProcessLocks: Boolean = false,
+    /**
+     * [BitrixConcurrencyMode.LEGACY] is the default and keeps current REST behaviour.
+     * [BitrixConcurrencyMode.SERVER_GUARDED] requires portal methods from
+     * `BITRIX_TSD_SERVER_LOCK_SPEC.md` and never falls back to standard REST on 404/5xx/timeout.
+     */
+    private val concurrencyMode: BitrixConcurrencyMode = BitrixConfig.concurrencyMode
 ) {
     private val documentMapper = DocumentMapper()
     private val documentElementsMapper = DocumentElementMapper()
@@ -302,6 +309,16 @@ class CatalogDocumentComingService(
             val operationId = draft.operationId
             TsdLogger.activeDocumentId = idDocument
             TsdLogger.activeOperationId = operationId
+            TsdLogger.info(
+                category = "CONDUCT",
+                event = "conduct_started",
+                operationId = operationId,
+                documentId = idDocument,
+                fields = mapOf(
+                    "concurrencyMode" to concurrencyMode.toDiagnosticLabel(),
+                    "itemCount" to currentProductListState.size
+                )
+            )
 
             if (draft.state == ComingOperationState.COMMITTED) {
                 return ConductResult(
@@ -422,6 +439,24 @@ class CatalogDocumentComingService(
             )
             if (serverPrecheck != null) {
                 return serverPrecheck
+            }
+
+            if (concurrencyMode == BitrixConcurrencyMode.SERVER_GUARDED) {
+                val deleteIds = (
+                    deletedProducts.filter { baseList.any { b -> b.idInDocument != null && b.idInDocument == it.idInDocument } }
+                        .mapNotNull { it.idInDocument } +
+                        draft.deletedRemoteElementIds
+                    ).distinct()
+                return conductWithServerGuard(
+                    idDocument = idDocument,
+                    operationId = operationId,
+                    offers = normalizedOffers,
+                    destinationStoreId = destinationStoreId,
+                    documentComment = documentComment,
+                    currentProductListState = currentProductListState,
+                    deleteIds = deleteIds,
+                    context = context
+                )
             }
 
             // PHASE 2: Ready -> Processing (Variations & Barcodes)
@@ -1489,6 +1524,342 @@ class CatalogDocumentComingService(
                     )
                 }
             }
+        }
+    }
+
+    private sealed class TsdGuardOutcome<out T> {
+        data class Success<T>(val value: T) : TsdGuardOutcome<T>()
+        data class Failure(
+            val message: String,
+            val requiresReconciliation: Boolean,
+            val isConflict: Boolean = false
+        ) : TsdGuardOutcome<Nothing>()
+    }
+
+    /**
+     * SERVER_GUARDED_MODE: variations and document conduct go through portal lock methods.
+     * HTTP 404 / 5xx / timeout never fall back to offer.add + element.add + conduct.
+     */
+    private suspend fun conductWithServerGuard(
+        idDocument: Int,
+        operationId: String,
+        offers: List<ProductOffer>,
+        destinationStoreId: Int,
+        documentComment: String?,
+        currentProductListState: List<Product>,
+        deleteIds: List<Int>,
+        context: Context?
+    ): ConductResult {
+        draftRepository.transitionState(
+            documentId = idDocument,
+            newState = ComingOperationState.READY
+        )
+        draftRepository.transitionState(
+            documentId = idDocument,
+            newState = ComingOperationState.PROCESSING,
+            syncState = ComingSyncState.SYNCING,
+            incrementAttempt = true
+        )
+
+        var remoteMutationOccurred = false
+        val resolved = mutableListOf<Pair<Int, ProductOffer>>()
+        for ((index, offer) in offers.withIndex()) {
+            when (val outcome = resolveVariationViaServerGuard(offer, operationId, idDocument, index)) {
+                is TsdGuardOutcome.Failure -> {
+                    return persistFailedConduct(
+                        documentId = idDocument,
+                        operationId = operationId,
+                        message = outcome.message,
+                        failedPositionIndex = index,
+                        requiresReconciliation = outcome.requiresReconciliation || remoteMutationOccurred
+                    )
+                }
+                is TsdGuardOutcome.Success -> {
+                    remoteMutationOccurred = true
+                    val offerId = outcome.value
+                    offer.id = offerId
+                    resolved.add(offerId to offer)
+                    draftRepository.recordItemStepProgress(
+                        documentId = idDocument,
+                        operationId = operationId,
+                        localItemId = offer.localItemId,
+                        offerId = offerId,
+                        idInDocument = offer.idInDocument,
+                        itemStatus = ComingItemStatus.BARCODE_ASSIGNED,
+                        syncState = ComingSyncState.REMOTE_VARIATION_CREATED,
+                        stepType = "TSD_RESOLVE_VARIATION",
+                        stepStatus = "SUCCEEDED",
+                        remoteEntityId = offerId,
+                        details = "mode=${concurrencyMode.toDiagnosticLabel()} offerId=$offerId"
+                    )
+                }
+            }
+        }
+
+        if (resolved.isNotEmpty()) {
+            updateDiameterAndWeightAndHeight(resolved.map { it.second }, operationId, idDocument)
+        }
+        updateComment(
+            comment = documentComment,
+            documentId = idDocument,
+            products = currentProductListState,
+            operationId = operationId
+        )
+
+        return when (
+            val sync = syncAndConductViaServerGuard(
+                idDocument = idDocument,
+                operationId = operationId,
+                resolved = resolved,
+                destinationStoreId = destinationStoreId,
+                deleteIds = deleteIds
+            )
+        ) {
+            is TsdGuardOutcome.Failure -> persistFailedConduct(
+                documentId = idDocument,
+                operationId = operationId,
+                message = sync.message,
+                requiresReconciliation = true
+            )
+            is TsdGuardOutcome.Success -> {
+                val result = sync.value
+                val status = result.status?.uppercase()
+                if (status != "Y") {
+                    val msg = "Серверная операция проведения не подтвердила status=Y (получено '$status'). Требуется сверка."
+                    return persistFailedConduct(
+                        documentId = idDocument,
+                        operationId = operationId,
+                        message = msg,
+                        requiresReconciliation = true
+                    )
+                }
+                CatalogReferenceCache.invalidateStores()
+                draftRepository.markCommittedAndFinalize(idDocument, operationId)
+                ConductResult(
+                    isSuccess = true,
+                    message = if (result.alreadyConducted) {
+                        "Документ №$idDocument уже проведён. Повторное проведение не выполнялось."
+                    } else {
+                        null
+                    },
+                    state = ComingOperationState.COMMITTED,
+                    operationId = operationId,
+                    reconciledAlreadyConducted = result.alreadyConducted
+                )
+            }
+        }
+    }
+
+    private suspend fun resolveVariationViaServerGuard(
+        offer: ProductOffer,
+        operationId: String,
+        documentId: Int,
+        index: Int
+    ): TsdGuardOutcome<Int> {
+        val posNum = index + 1
+        val barcode = BarcodeSanitizer.normalizeForComingVariation(offer.barcode)
+        val request = TsdVariationResolveRequest(
+            operationId = operationId,
+            parentProductId = offer.parentId,
+            barcode = barcode,
+            localItemId = offer.localItemId,
+            offerFields = mapOf(
+                "iblockId" to BitrixConfig.iblockOffers,
+                "name" to offer.name,
+                "measure" to offer.measure,
+                "parentId" to offer.parentId
+            )
+        )
+        return try {
+            val response = apiBitrix.tsdVariationResolveOrCreate(request)
+            classifyTsdGuardResponse(
+                code = response.code(),
+                successful = response.isSuccessful,
+                error = response.body()?.error,
+                errorDescription = response.body()?.errorDescription,
+                unavailableMessage = "Серверная защита вариаций недоступна (${concurrencyMode.toDiagnosticLabel()}). " +
+                    "Создание вариации через стандартный REST заблокировано до восстановления tsd.variation.resolveOrCreate.",
+                conflictPrefix = "Позиция №$posNum (${offer.name ?: ""}): "
+            ) ?: run {
+                val offerId = response.body()?.result?.offerId ?: 0
+                if (offerId <= 0) {
+                    TsdGuardOutcome.Failure(
+                        message = "Позиция №$posNum: сервер не вернул offerId. Результат не подтверждён — требуется сверка.",
+                        requiresReconciliation = true
+                    )
+                } else {
+                    if (!barcode.isNullOrBlank()) {
+                        CatalogReferenceCache.putBarcodeMapping(barcode, offerId)
+                    }
+                    TsdGuardOutcome.Success(offerId)
+                }
+            }
+        } catch (e: IOException) {
+            TsdLogger.warn(
+                category = "VARIATION",
+                event = "tsd_resolve_timeout",
+                operationId = operationId,
+                documentId = documentId,
+                throwable = e
+            )
+            TsdGuardOutcome.Failure(
+                message = "Позиция №$posNum: связь прервалась при атомарном создании вариации. " +
+                    "Стандартный REST не используется. Требуется сверка.",
+                requiresReconciliation = true
+            )
+        } catch (e: Exception) {
+            TsdGuardOutcome.Failure(
+                message = "Позиция №$posNum: ошибка серверной защиты вариаций (${e.message}). Требуется сверка.",
+                requiresReconciliation = true
+            )
+        }
+    }
+
+    private suspend fun syncAndConductViaServerGuard(
+        idDocument: Int,
+        operationId: String,
+        resolved: List<Pair<Int, ProductOffer>>,
+        destinationStoreId: Int,
+        deleteIds: List<Int>
+    ): TsdGuardOutcome<TsdDocumentSyncResponse.Result> {
+        val items = resolved.map { (offerId, offer) ->
+            TsdDocumentSyncItem(
+                localItemId = offer.localItemId,
+                offerId = offerId,
+                quantity = offer.product.quantity ?: 0.0,
+                storeTo = offer.product.destinationStoreId.takeIf { it > 0 } ?: destinationStoreId,
+                batchNumber = offer.product.batchNumber
+            )
+        }
+        val request = TsdDocumentSyncRequest(
+            operationId = operationId,
+            documentId = idDocument,
+            items = items,
+            deletedRemoteElementIds = deleteIds
+        )
+        return try {
+            val response = apiBitrix.tsdDocumentSyncAndConduct(request)
+            classifyTsdGuardResponse(
+                code = response.code(),
+                successful = response.isSuccessful,
+                error = response.body()?.error,
+                errorDescription = response.body()?.errorDescription,
+                unavailableMessage = "Серверная защита проведения недоступна (${concurrencyMode.toDiagnosticLabel()}). " +
+                    "Проведение через стандартный REST заблокировано до восстановления tsd.document.syncAndConduct.",
+                conflictPrefix = ""
+            ) ?: run {
+                val result = response.body()?.result
+                if (result == null || result.documentId <= 0 && result.status.isNullOrBlank()) {
+                    TsdGuardOutcome.Failure(
+                        message = "Сервер не подтвердил результат проведения. Требуется сверка.",
+                        requiresReconciliation = true
+                    )
+                } else {
+                    result.items.forEach { synced ->
+                        val localId = synced.localItemId ?: return@forEach
+                        val product = resolved.firstOrNull { it.second.localItemId == localId }?.second?.product
+                        if (product != null) {
+                            if (synced.elementId > 0) product.idInDocument = synced.elementId
+                            if (synced.offerId > 0) product.offerId = synced.offerId
+                            draftRepository.recordItemStepProgress(
+                                documentId = idDocument,
+                                operationId = operationId,
+                                localItemId = localId,
+                                offerId = product.offerId,
+                                idInDocument = product.idInDocument,
+                                itemStatus = ComingItemStatus.ELEMENT_ADDED,
+                                syncState = ComingSyncState.REMOTE_ELEMENT_CREATED,
+                                stepType = "TSD_SYNC_ELEMENT",
+                                stepStatus = "SUCCEEDED",
+                                remoteEntityId = synced.elementId,
+                                details = "elementId=${synced.elementId} qty=${synced.quantity}"
+                            )
+                        }
+                    }
+                    TsdGuardOutcome.Success(result)
+                }
+            }
+        } catch (e: IOException) {
+            TsdLogger.warn(
+                category = "CONDUCT",
+                event = "tsd_sync_timeout",
+                operationId = operationId,
+                documentId = idDocument,
+                throwable = e
+            )
+            TsdGuardOutcome.Failure(
+                message = "Связь прервалась во время атомарного проведения. Стандартный REST не используется. Требуется сверка.",
+                requiresReconciliation = true
+            )
+        } catch (e: Exception) {
+            TsdGuardOutcome.Failure(
+                message = "Ошибка серверной защиты проведения (${e.message}). Требуется сверка.",
+                requiresReconciliation = true
+            )
+        }
+    }
+
+    private fun classifyTsdGuardResponse(
+        code: Int,
+        successful: Boolean,
+        error: String?,
+        errorDescription: String?,
+        unavailableMessage: String,
+        conflictPrefix: String
+    ): TsdGuardOutcome.Failure? {
+        val combined = listOfNotNull(error, errorDescription).joinToString(": ").ifBlank { null }
+        if (code == 404 || code == 501) {
+            TsdLogger.error(
+                category = "CONDUCT",
+                event = "server_guard_unavailable",
+                fields = mapOf(
+                    "mode" to concurrencyMode.toDiagnosticLabel(),
+                    "http" to code,
+                    "error" to (error ?: "")
+                )
+            )
+            return TsdGuardOutcome.Failure(
+                message = unavailableMessage,
+                requiresReconciliation = false
+            )
+        }
+        if (code == 409 || error == "BARCODE_FOREIGN_CONFLICT" || error == "OPERATION_PAYLOAD_CONFLICT") {
+            val detail = combined ?: "конфликт конкурентной операции"
+            return TsdGuardOutcome.Failure(
+                message = conflictPrefix + humanizeTsdGuardConflict(error, detail),
+                requiresReconciliation = false,
+                isConflict = true
+            )
+        }
+        if (code == 423 || error == "LOCK_TIMEOUT") {
+            return TsdGuardOutcome.Failure(
+                message = conflictPrefix + "Серверная блокировка занята другим ТСД. Повторите после освобождения. Стандартный REST не используется.",
+                requiresReconciliation = false
+            )
+        }
+        if (!successful || code in 500..599) {
+            return TsdGuardOutcome.Failure(
+                message = conflictPrefix + (combined ?: "Ошибка серверной защиты (HTTP $code). Изменяющая операция не подтверждена — требуется сверка."),
+                requiresReconciliation = true
+            )
+        }
+        if (!error.isNullOrBlank() && error != "0") {
+            return TsdGuardOutcome.Failure(
+                message = conflictPrefix + humanizeTsdGuardConflict(error, combined ?: error),
+                requiresReconciliation = error != "BARCODE_FOREIGN_CONFLICT",
+                isConflict = error.contains("CONFLICT")
+            )
+        }
+        return null
+    }
+
+    private fun humanizeTsdGuardConflict(error: String?, detail: String): String {
+        return when (error) {
+            "BARCODE_FOREIGN_CONFLICT" ->
+                "штрихкод уже закреплён за другим товаром. Чужая карточка не изменялась."
+            "OPERATION_PAYLOAD_CONFLICT" ->
+                "тот же operationId уже использован с другими параметрами. Повтор с другим содержимым отклонён."
+            else -> detail
         }
     }
 

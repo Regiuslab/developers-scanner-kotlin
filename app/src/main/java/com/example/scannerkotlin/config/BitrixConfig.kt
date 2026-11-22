@@ -31,6 +31,14 @@ object BitrixConfig {
     val barcodeComingBaseUrl: String
         get() = webhookBaseUrl(webhookBarcodeComing)
 
+    /**
+     * Default [LEGACY]. Enable [SERVER_GUARDED] only after portal methods from
+     * `BITRIX_TSD_SERVER_LOCK_SPEC.md` are installed. Missing methods do **not**
+     * fall back to standard REST.
+     */
+    val concurrencyMode: BitrixConcurrencyMode
+        get() = BitrixConcurrencyMode.fromConfig(BuildConfig.BITRIX_CONCURRENCY_MODE)
+
     private fun webhookBaseUrl(token: String): String =
         "https://$host/rest/$restUserId/$token/"
 }

@@ -1,6 +1,6 @@
 # ИТОГОВЫЙ ТЕХНИЧЕСКИЙ ОТЧЁТ ПО СТАБИЛИЗАЦИИ ПРИЛОЖЕНИЯ ТСД (`TSD_STABILITY_FINAL_REPORT.md`)
 
-**Дата:** 22.11.2026 (обновлено вечером: дополнительный code review перед запуском)  
+**Дата:** 22.11.2026 (обновлено: P1 конкуренция ТСД, режимы LEGACY / SERVER_GUARDED)  
 **Проект:** `ScannerKotlin` (`com.example.scannerkotlin`, `minSdk = 24`, `targetSdk = 35`, `compileSdk = 35`)  
 **Связанный документ аудита:** `AUDIT_REPORT.md`
 
@@ -33,7 +33,7 @@
 - Реализованы двухфазная предварительная валидация прихода до создания вариаций, проверка принадлежности вариации и штрихкода (`parentId` + `iblockOffers`) с блокировкой конфликта чужого штрихкода, сохранение созданных `offerId`/`idInDocument` на каждом шаге, идемпотентная синхронизация строк документа с `catalog.document.element.list` и обязательная сверка статуса проведения документа (`status == "Y"`) в Битрикс, включая обработку тайм-аутов и прерванных операций (`PROCESSING` → `RECONCILIATION_REQUIRED`).
 
 ### Что осталось проблемным / ограниченным
-- Серверная часть Битрикс24 (`bitrix.izocom.by`) находится вне данного репозитория и не предоставляет единой серверной ACID-транзакции на связку `offer.add` + `barcode.setbyproductid` + `document.element.add` + `document.conduct`. На стороне Android реализована полная пошаговая идемпотентность и сверка с сервером, однако при одновременном создании **новой** вариации с одним и тем же новым штрихкодом с двух ТСД в одно миллисекундное окно окончательная атомарность возможна только при поддержке уникального индекса/блокировки на стороне портала Битрикс.
+- Серверная часть Битрикс24 (`bitrix.izocom.by`) не предоставляет ACID-транзакцию на связку стандартного REST. Клиент по умолчанию в **LEGACY_MODE**. **SERVER_GUARDED_MODE** подключается только конфигом после установки `portal/tsd-guard/` и не откатывается на REST при 404/5xx. До установки модуля на staging полная защита двух ТСД **не заявлена** (см. 17.12).
 - В тестовой среде отсутствует физический ТСД Xcheng и выделенный тестовый (staging) контур Битрикс24 (в конфигурации прописан боевой портал `bitrix.izocom.by`, проведение стресс-операций на котором запрещено). Все сценарии API Битрикс проверены на полнофункциональном stateful Mock-сервере REST API Битрикс, а SQLite WAL, UI `480x800`, широковещательные события сканера, `SIGKILL`, `am force-stop`, офлайн-режим и принудительный crash — на Android-эмуляторе.
 
 ### Рекомендация к запуску
@@ -363,3 +363,93 @@
 **`READY FOR STAGING`**
 
 Не `READY FOR PILOT`: нет физического ТСД, нет серверных endpoint блокировки на портале, нет повторного instrumentation в этом цикле, production-Битрикс не использовался.
+
+---
+
+## 17.12. P1: честные конкурентные тесты, режимы и серверный контракт (22.11.2026, вечер)
+
+### 1. Подтверждённые проблемы
+
+| ID | Проблема | Статус |
+|---|---|---|
+| **CX-01 LEGACY** | Два `offer.add` на один новый штрихкод: 2 вариации, 1 привязка штрихкода | **FIXED AND TESTED** как диагностический тест ограничения (не приёмка уникальности) |
+| **CX-02 LEGACY** | Два ТСД на один документ: 2 строки при одном `conduct` | **FIXED AND TESTED** как диагностический тест (rows=2, conductCalls=1, stockMoved=3.0 — вторая строка после conduct) |
+| **Ложный PASS** | Старые CX-01/CX-02 проходили при лишней вариации / дубле строк | **FIXED AND TESTED** — тесты разделены на LEGACY-диагностику и SERVER_GUARDED-приёмку |
+| **UNIQUE(doc,element)** | Схлопнуло бы законные повторные строки одного товара | **FIXED AND TESTED** в контракте: ключ `(operationId, localItemId, documentId)` |
+| **Авто-fallback на REST** | 404/5xx отключал бы защиту незаметно | **FIXED AND TESTED** (`CX-10`): SERVER_GUARDED останавливается, REST=0 |
+| **Серверная атомарность на портале** | PHP-модуль не установлен на Bitrix | **BLOCKED BY SERVER** / **IMPLEMENTED, NOT INTEGRATION-TESTED** |
+
+### 2. Что исправлено в Android
+
+- Режимы `LEGACY_MODE` (по умолчанию) и `SERVER_GUARDED_MODE` (`bitrix.concurrency.mode` / `BuildConfig.BITRIX_CONCURRENCY_MODE`). Режим пишется в лог `conduct_started`.
+- В `SERVER_GUARDED` вариации и проведение идут только через `tsd.variation.resolveOrCreate` и `tsd.document.syncAndConduct`.
+- HTTP 404/5xx/тайм-аут **не** переключают клиент на `offer.add` + `element.add` + `conduct`.
+- Режим по умолчанию **не** SERVER_GUARDED — реальных endpoint на портале нет.
+
+### 3. Серверная часть
+
+Исходники: `portal/tsd-guard/` (`GET_LOCK`, `tsd_operation`, REST-методы).  
+**Не установлены** на `bitrix.izocom.by`. **Не integration-tested.** Не объявлены работающими.
+
+Контракт: `BITRIX_TSD_SERVER_LOCK_SPEC.md`.  
+Идентичность строки: `(operationId, localItemId, documentId)`, без `UNIQUE(doc_id, element_id)`.
+
+### 4. Изменённые файлы
+
+- `CatalogDocumentComingService.kt` — ветка `conductWithServerGuard`
+- `BitrixConcurrencyMode.kt`, `BitrixConfig.kt`, `app/build.gradle.kts`
+- `ApiBitrix.kt`, `TsdVariationResolveRequest/Response`, `TsdDocumentSyncRequest/Response`
+- `CatalogDocumentComingServiceTest.kt` — CX-01/02 split, CX-06…CX-12, счётчик остатков Mock
+- `BitrixConcurrencyModeTest.kt`
+- `BITRIX_TSD_SERVER_LOCK_SPEC.md`
+- `portal/tsd-guard/*`
+- `TSD_STABILITY_FINAL_REPORT.md`
+
+### 5. Конкурентные тесты (два клиента, разные FileBacked хранилища, общий Mock)
+
+| ID | Режим | Результат | Состояние сервера |
+|---|---|---|---|
+| **CX-01 LEGACY** | LEGACY | **CONFIRMED_LIMITATION** | `offerAddCalls=2`, 1 barcode binding, parentId=51 |
+| **CX-01 SERVER_GUARDED** | GUARDED | **FIXED AND TESTED** | 1 вариация, оба клиента один `offerId`, документы 901/902 `Y`, stock 2.0 и 5.0 |
+| **CX-02 LEGACY** | LEGACY | **CONFIRMED_LIMITATION** | rows=2, conductCalls=1, stockMoved=3.0 |
+| **CX-02 SERVER_GUARDED** | GUARDED | **FIXED AND TESTED** | rows=1, stock=3.0, conductCalls=1, один клиент `alreadyConducted` |
+| **CX-03** | LEGACY | **FIXED AND TESTED** | повторное использование победившего `offerId`, `offerAddCalls=1` |
+| **CX-04** | LEGACY | **FIXED AND TESTED** | `conductCalls=1`, повтор без второго движения |
+| **CX-05** | LEGACY | **FIXED AND TESTED** | чужой товар не изменён, документ `N` |
+| **CX-06** | GUARDED | **FIXED AND TESTED** | одна логическая строка, rows=1, stock=4.0 |
+| **CX-07** | GUARDED | **FIXED AND TESTED** | два `localItemId` одного `offerId`, rows=2, stock=7.0 |
+| **CX-08** | GUARDED | **FIXED AND TESTED** | повтор `operationId`: rows=1, stock=3.0, conductCalls=1 |
+| **CX-09** | GUARDED | **FIXED AND TESTED** | HTTP 409, rows=1, stock=3.0 |
+| **CX-10** | GUARDED, API 404 | **FIXED AND TESTED** | offer/barcode/element/conduct = 0 |
+| **CX-11** | GUARDED | **FIXED AND TESTED** | после тайм-аута 1 вариация, rows=1, stock=2.0 |
+| **CX-12** | GUARDED | **FIXED AND TESTED** | после тайм-аута rows=1, stock=8.0, conductCalls=1 |
+
+GUARDED-приёмка работает на атомарном **тестовом** double портала. Это не живой Битрикс.
+
+Локальный валидатор ТСД по-прежнему запрещает два одинаковых штрихкода в одном черновике; CX-07 проверяет серверный контракт двух законных строк одного `offerId`.
+
+### 6. Unit / stress / сборка
+
+| Проверка | Результат |
+|---|---|
+| `testDebugUnitTest` | **PASS** 70/70, 0 failed |
+| Стресс 100/500/1000 + parallel persist | **PASS**, потерь 0 (в составе unit) |
+| `assembleDebug` / `assembleRelease` | **BUILD SUCCESSFUL** |
+| `connectedDebugAndroidTest` | **NOT RUN** (`adb devices` пуст) |
+| Перезагрузка ТСД / физический лазер | **NOT RUN** |
+| Живой Bitrix (staging/production) | **NOT RUN** (production запрещён) |
+
+Падения в прогнанных JVM-тестах: **0**. Потерянные сканирования в persist-тестах: **0**.
+
+### 7. Остаточные риски
+
+- Пока портал без `portal/tsd-guard`, приложение в **LEGACY_MODE**: гонки CX-01/CX-02 на двух физических ТСД остаются.
+- PHP-модуль **IMPLEMENTED, NOT INTEGRATION-TESTED**.
+- Включение `SERVER_GUARDED` до установки методов заблокирует проведение (`CX-10`).
+- P0 webhook-ключи не трогались.
+
+### 8. Готовность
+
+**`READY FOR STAGING`**
+
+Не `READY FOR PILOT`: нет установленного серверного модуля на staging-портале, нет двух физических ТСД, instrumentation **NOT RUN**. Mock-тесты SERVER_GUARDED не заменяют пилот.

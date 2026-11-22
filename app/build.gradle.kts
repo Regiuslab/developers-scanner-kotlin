@@ -47,6 +47,7 @@ android {
         val roleStorekeeper = bitrixProp("bitrix.role.storekeeper", "75")
         val roleOtk = bitrixProp("bitrix.role.otk", "76")
         val tenantName = bitrixProp("bitrix.tenant.name", "izocom")
+        val concurrencyMode = bitrixProp("bitrix.concurrency.mode", "LEGACY")
 
         buildConfigField("String", "BITRIX_HOST", "\"$bitrixHost\"")
         buildConfigField("String", "BITRIX_REST_USER_ID", "\"$bitrixUserId\"")
@@ -59,6 +60,7 @@ android {
         buildConfigField("String", "BITRIX_ROLE_STOREKEEPER", "\"$roleStorekeeper\"")
         buildConfigField("String", "BITRIX_ROLE_OTK", "\"$roleOtk\"")
         buildConfigField("String", "BITRIX_TENANT_NAME", "\"$tenantName\"")
+        buildConfigField("String", "BITRIX_CONCURRENCY_MODE", "\"$concurrencyMode\"")
         buildConfigField("String", "DEVELOPER_WEBSITE", "\"https://regiuslab.by/\"")
     }
 

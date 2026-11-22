@@ -79,6 +79,20 @@ interface ApiBitrix {
         @Body request: AddDocumentElementRequest
     ) : Response<HashMap<String, Any?>>
 
+    /**
+     * Portal TSD guard. Present only after `BITRIX_TSD_SERVER_LOCK_SPEC.md` is installed.
+     * SERVER_GUARDED treats HTTP 404 as a hard stop, not a fallback to standard REST.
+     */
+    @POST("tsd.variation.resolveOrCreate")
+    suspend fun tsdVariationResolveOrCreate(
+        @Body request: TsdVariationResolveRequest
+    ): Response<TsdVariationResolveResponse>
+
+    @POST("tsd.document.syncAndConduct")
+    suspend fun tsdDocumentSyncAndConduct(
+        @Body request: TsdDocumentSyncRequest
+    ): Response<TsdDocumentSyncResponse>
+
     @GET("catalog.store.list")
     suspend fun getStoreList(): Response<HashMap<String, Any?>>
 

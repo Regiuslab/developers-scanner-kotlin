@@ -2,6 +2,7 @@ package com.example.scannerkotlin.service
 
 import com.example.scannerkotlin.api.ApiBitrix
 import com.example.scannerkotlin.cache.CatalogReferenceCache
+import com.example.scannerkotlin.config.BitrixConcurrencyMode
 import com.example.scannerkotlin.model.ComingOperationState
 import com.example.scannerkotlin.model.Product
 import com.example.scannerkotlin.model.ProductOffer
@@ -28,6 +29,9 @@ import com.example.scannerkotlin.request.ProviderRequest
 import com.example.scannerkotlin.request.SgpRequest
 import com.example.scannerkotlin.request.StoreAmountRequest
 import com.example.scannerkotlin.request.UpdateCommentRequest
+import com.example.scannerkotlin.request.TsdDocumentSyncItem
+import com.example.scannerkotlin.request.TsdDocumentSyncRequest
+import com.example.scannerkotlin.request.TsdVariationResolveRequest
 import com.example.scannerkotlin.request.UpdateProductRequest
 import com.example.scannerkotlin.request.UpdatedDocumentElementsRequest
 import com.example.scannerkotlin.request.VariationsRequest
@@ -46,6 +50,8 @@ import com.example.scannerkotlin.response.ProductResponse
 import com.example.scannerkotlin.response.SecondBlankResponse
 import com.example.scannerkotlin.response.SgpResponse
 import com.example.scannerkotlin.response.StoreAmountResponse
+import com.example.scannerkotlin.response.TsdDocumentSyncResponse
+import com.example.scannerkotlin.response.TsdVariationResolveResponse
 import com.example.scannerkotlin.response.VariationsResponse
 import com.google.gson.internal.LinkedTreeMap
 import kotlinx.coroutines.async
@@ -704,7 +710,7 @@ class CatalogDocumentComingServiceTest {
     }
 
     @Test
-    fun `CX-01 two TSD clients racing a new barcode keep unique mapping and do not overwrite foreign goods`() = runBlocking {
+    fun `CX-01 LEGACY two TSD racing a new barcode confirms extra variation limitation`() = runBlocking {
         val barcode = "4600000000801"
         fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
         fakeServer.seedDraftDocument(801)
@@ -742,34 +748,78 @@ class CatalogDocumentComingServiceTest {
         assertNotNull(boundOffer)
         val boundParent = ((fakeServer.offersById[boundOffer]!!["parentId"] as LinkedTreeMap<*, *>)["value"] as Number).toInt()
         assertEquals(51, boundParent)
-        assertTrue(
-            "No foreign parent may own this barcode",
-            fakeServer.offersById.values.all { offer ->
-                val parent = ((offer["parentId"] as? LinkedTreeMap<*, *>)?.get("value") as? Number)?.toInt()
-                parent == null || parent == 51
-            }
+        val extraVariations = fakeServer.offerAddCalls.get() - 1
+        println(
+            "CX-01 LEGACY CONFIRMED_LIMITATION offerAddCalls=${fakeServer.offerAddCalls.get()} " +
+                "extraVariations=$extraVariations uniqueBarcodes=1 boundOffer=$boundOffer"
         )
-        // Standard Bitrix offer.add is NOT atomic vs barcode: two offers MAY be created.
-        // The test records that limitation instead of hiding it behind a fake unique index.
-        println("CX-01 LIMITATION offerAddCalls=${fakeServer.offerAddCalls.get()} uniqueBarcodes=1 boundOffer=$boundOffer")
-        assertTrue(
-            "At least one variation must exist",
-            fakeServer.offerAddCalls.get() >= 1
+        assertEquals(
+            "LEGACY REST must expose the extra-variation race (do not hide it behind a unique mock)",
+            2,
+            fakeServer.offerAddCalls.get()
         )
-        assertEquals(2, listOf(801, 802).count { fakeServer.documentStatuses[it] == "Y" })
+        assertTrue(
+            "Orphan variation exists without a barcode binding",
+            fakeServer.offersById.size >= 2
+        )
         assertNotNull(repoA.getDraft(801))
         assertNotNull(repoB.getDraft(802))
     }
 
     @Test
-    fun `CX-02 two isolated TSD clients conducting the same document do not double-conduct stock`() = runBlocking {
+    fun `CX-01 SERVER_GUARDED two TSD racing a new barcode create one variation`() = runBlocking {
+        val barcode = "4600000000801"
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.seedDraftDocument(901)
+        fakeServer.seedDraftDocument(902)
+
+        val (_, serviceA) = newIsolatedClient(fakeServer, "tsd_a_cx01g", BitrixConcurrencyMode.SERVER_GUARDED)
+        val (_, serviceB) = newIsolatedClient(fakeServer, "tsd_b_cx01g", BitrixConcurrencyMode.SERVER_GUARDED)
+        val itemA = comingProduct(id = 51, name = "Труба 63", barcode = barcode, qty = 2.0)
+        val itemB = comingProduct(id = 51, name = "Труба 63", barcode = barcode, qty = 5.0)
+
+        val jobA = async {
+            serviceA.conductDocumentSuspend(
+                baseList = emptyList(), idDocument = 901, context = null, documentComment = "TSD-A",
+                deletedProducts = emptyList(), updatedProducts = listOf(itemA),
+                currentProductListState = listOf(itemA), productOffersList = listOf(ProductOffer(itemA))
+            )
+        }
+        val jobB = async {
+            serviceB.conductDocumentSuspend(
+                baseList = emptyList(), idDocument = 902, context = null, documentComment = "TSD-B",
+                deletedProducts = emptyList(), updatedProducts = listOf(itemB),
+                currentProductListState = listOf(itemB), productOffersList = listOf(ProductOffer(itemB))
+            )
+        }
+        val rA = jobA.await()
+        val rB = jobB.await()
+        assertTrue("TSD-A: ${rA.message}", rA.isSuccess)
+        assertTrue("TSD-B: ${rB.message}", rB.isSuccess)
+        assertEquals(1, fakeServer.offerAddCalls.get())
+        assertEquals(1, fakeServer.offersById.size)
+        assertEquals(1, fakeServer.barcodeToOfferId.size)
+        val offerA = itemA.offerId ?: fakeServer.barcodeToOfferId[barcode]
+        val offerB = itemB.offerId ?: fakeServer.barcodeToOfferId[barcode]
+        assertEquals(offerA, offerB)
+        assertEquals(51, ((fakeServer.offersById[offerA]!!["parentId"] as LinkedTreeMap<*, *>)["value"] as Number).toInt())
+        assertEquals("Y", fakeServer.documentStatuses[901])
+        assertEquals("Y", fakeServer.documentStatuses[902])
+        assertEquals(2.0, fakeServer.stockMovedByDocument[901])
+        assertEquals(5.0, fakeServer.stockMovedByDocument[902])
+    }
+
+    @Test
+    fun `CX-02 LEGACY two TSD conducting one document confirms duplicate row limitation`() = runBlocking {
         val docId = 812
         fakeServer.seedDraftDocument(docId)
         fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.elementListRaceParticipants = 2
         fakeServer.elementAddRaceParticipants = 2
 
         val itemA = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000812", qty = 3.0)
-        val itemB = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000812", qty = 3.0)
+        val itemB = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000813", qty = 3.0)
         val (_, serviceA) = newIsolatedClient(fakeServer, "tsd_a_cx02")
         val (_, serviceB) = newIsolatedClient(fakeServer, "tsd_b_cx02")
 
@@ -790,19 +840,61 @@ class CatalogDocumentComingServiceTest {
         val rA = jobA.await()
         val rB = jobB.await()
 
-        assertTrue("At least one client must finish successfully: A=${rA.message} B=${rB.message}", rA.isSuccess || rB.isSuccess)
+        assertTrue("At least one client must finish: A=${rA.message} B=${rB.message}", rA.isSuccess || rB.isSuccess)
         assertEquals("Y", fakeServer.documentStatuses[docId])
-        val successful = listOf(rA, rB).count { it.isSuccess }
-        assertTrue(successful >= 1)
-        // Bitrix catalog.document.conduct is not idempotent across devices; mock rejects a second Y.
-        // Actual remaining limitation: duplicate element rows if both pass last-second list refetch.
         val rows = fakeServer.documentElements[docId]?.size ?: 0
-        println("CX-02 LIMITATION elementAddCalls=${fakeServer.elementAddCalls.get()} rows=$rows conductCalls=${fakeServer.conductCalls.get()} successes=$successful")
-        assertEquals("Y", fakeServer.documentStatuses[docId])
-        assertTrue("Document must not stay unconducted", fakeServer.documentStatuses[docId] == "Y")
-        if (rows > 1) {
-            println("CX-02 REVEALED: duplicate document rows without server unique(docId, elementId)")
+        val stock = fakeServer.stockMovedByDocument[docId] ?: 0.0
+        println(
+            "CX-02 LEGACY CONFIRMED_LIMITATION rows=$rows stock=$stock " +
+                "elementAddCalls=${fakeServer.elementAddCalls.get()} conductCalls=${fakeServer.conductCalls.get()}"
+        )
+        assertEquals(
+            "LEGACY REST must expose duplicate document rows (do not treat this as uniqueness PASS)",
+            2,
+            rows
+        )
+        assertEquals(1, fakeServer.conductCalls.get())
+        assertFalse(
+            "A single intended line of qty=3 must not remain a consistent unique row; extra row is the confirmed limitation (stockMoved=$stock)",
+            rows == 1 && kotlin.math.abs(stock - 3.0) < 0.001
+        )
+    }
+
+    @Test
+    fun `CX-02 SERVER_GUARDED two TSD conducting one document do not duplicate rows or stock`() = runBlocking {
+        val docId = 912
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.seedDraftDocument(docId)
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+
+        val itemA = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000912", qty = 3.0)
+        val itemB = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000912", qty = 3.0)
+        val (_, serviceA) = newIsolatedClient(fakeServer, "tsd_a_cx02g", BitrixConcurrencyMode.SERVER_GUARDED)
+        val (_, serviceB) = newIsolatedClient(fakeServer, "tsd_b_cx02g", BitrixConcurrencyMode.SERVER_GUARDED)
+
+        val jobA = async {
+            serviceA.conductDocumentSuspend(
+                baseList = emptyList(), idDocument = docId, context = null, documentComment = null,
+                deletedProducts = emptyList(), updatedProducts = listOf(itemA),
+                currentProductListState = listOf(itemA), productOffersList = listOf(ProductOffer(itemA))
+            )
         }
+        val jobB = async {
+            serviceB.conductDocumentSuspend(
+                baseList = emptyList(), idDocument = docId, context = null, documentComment = null,
+                deletedProducts = emptyList(), updatedProducts = listOf(itemB),
+                currentProductListState = listOf(itemB), productOffersList = listOf(ProductOffer(itemB))
+            )
+        }
+        val rA = jobA.await()
+        val rB = jobB.await()
+        assertTrue("A=${rA.message}", rA.isSuccess)
+        assertTrue("B=${rB.message}", rB.isSuccess)
+        assertEquals("Y", fakeServer.documentStatuses[docId])
+        assertEquals(1, fakeServer.documentElements[docId]?.size)
+        assertEquals(3.0, fakeServer.stockMovedByDocument[docId] ?: 0.0, 0.001)
+        assertEquals(1, fakeServer.conductCalls.get())
+        assertTrue(rA.reconciledAlreadyConducted || rB.reconciledAlreadyConducted)
     }
 
     @Test
@@ -892,9 +984,227 @@ class CatalogDocumentComingServiceTest {
         assertEquals(0, fakeServer.conductCalls.get())
     }
 
+    @Test
+    fun `CX-06 SERVER_GUARDED concurrent add of the same logical row does not duplicate`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.seedDraftDocument(960)
+        fakeServer.seedExistingOffer(432, 51, "Труба 63", "4600000000960")
+        val request = TsdDocumentSyncRequest(
+            operationId = "op-cx06",
+            documentId = 960,
+            items = listOf(
+                TsdDocumentSyncItem(
+                    localItemId = "logical-row-1",
+                    offerId = 432,
+                    quantity = 4.0,
+                    storeTo = 1
+                )
+            )
+        )
+        val jobA = async { fakeServer.tsdDocumentSyncAndConduct(request) }
+        val jobB = async { fakeServer.tsdDocumentSyncAndConduct(request) }
+        val rA = jobA.await()
+        val rB = jobB.await()
+        assertTrue(rA.isSuccessful)
+        assertTrue(rB.isSuccessful)
+        assertEquals(1, fakeServer.documentElements[960]?.size)
+        assertEquals(4.0, fakeServer.stockMovedByDocument[960] ?: 0.0, 0.001)
+        assertEquals(1, fakeServer.conductCalls.get())
+        assertEquals("Y", fakeServer.documentStatuses[960])
+        val ids = setOf(
+            rA.body()?.result?.items?.first()?.elementId,
+            rB.body()?.result?.items?.first()?.elementId
+        )
+        assertEquals(1, ids.size)
+    }
+
+    @Test
+    fun `CX-07 SERVER_GUARDED keeps two legitimate rows of the same offer`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.seedDraftDocument(970)
+        fakeServer.seedExistingOffer(432, 51, "Труба 63", "4600000000970")
+        val result = fakeServer.tsdDocumentSyncAndConduct(
+            TsdDocumentSyncRequest(
+                operationId = "op-cx07",
+                documentId = 970,
+                items = listOf(
+                    TsdDocumentSyncItem("row-p1", 432, 2.0, 1, "P1"),
+                    TsdDocumentSyncItem("row-p2", 432, 5.0, 1, "P2")
+                )
+            )
+        )
+        assertTrue(result.isSuccessful)
+        assertEquals(2, fakeServer.documentElements[970]?.size)
+        assertEquals(7.0, fakeServer.stockMovedByDocument[970] ?: 0.0, 0.001)
+        val localIds = fakeServer.documentElements[970].orEmpty().map { it["localItemId"] }.toSet()
+        assertEquals(setOf("row-p1", "row-p2"), localIds)
+        assertEquals(1, fakeServer.offersById.size)
+        assertEquals("Y", fakeServer.documentStatuses[970])
+    }
+
+    @Test
+    fun `CX-08 SERVER_GUARDED retry with same operationId is idempotent`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.seedDraftDocument(980)
+        val item = comingProduct(51, "Труба 63", "4600000000980", 3.0)
+        val engine = FileBackedDraftStorageEngine(tempFolder.newFolder("tsd_cx08"))
+        val repo = ComingDraftRepository(engine)
+        val service = CatalogDocumentComingService(
+            apiBitrix = fakeServer,
+            apiBarcode = fakeServer,
+            draftRepository = repo,
+            isolateProcessLocks = true,
+            concurrencyMode = BitrixConcurrencyMode.SERVER_GUARDED
+        )
+        val first = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 980, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertTrue(first.message, first.isSuccess)
+        assertEquals(1, fakeServer.documentElements[980]?.size)
+        assertEquals(3.0, fakeServer.stockMovedByDocument[980] ?: 0.0, 0.001)
+        val operationId = repo.getDraft(980)!!.operationId
+        engine.updateDraftMetadata(980, state = ComingOperationState.PROCESSING)
+        val retry = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 980, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertTrue(retry.message, retry.isSuccess)
+        assertEquals(operationId, retry.operationId ?: repo.getDraft(980)?.operationId)
+        assertEquals(1, fakeServer.documentElements[980]?.size)
+        assertEquals(3.0, fakeServer.stockMovedByDocument[980] ?: 0.0, 0.001)
+        assertEquals(1, fakeServer.conductCalls.get())
+        assertEquals(1, fakeServer.offerAddCalls.get())
+    }
+
+    @Test
+    fun `CX-09 SERVER_GUARDED same operationId with different payload is an explicit conflict`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.seedDraftDocument(990)
+        fakeServer.seedExistingOffer(432, 51, "Труба 63", "4600000000990")
+        val first = fakeServer.tsdDocumentSyncAndConduct(
+            TsdDocumentSyncRequest(
+                operationId = "op-cx09",
+                documentId = 990,
+                items = listOf(
+                    TsdDocumentSyncItem("row-1", 432, 3.0, 1)
+                )
+            )
+        )
+        assertTrue(first.isSuccessful)
+        assertEquals("Y", fakeServer.documentStatuses[990])
+        val second = fakeServer.tsdDocumentSyncAndConduct(
+            TsdDocumentSyncRequest(
+                operationId = "op-cx09",
+                documentId = 990,
+                items = listOf(
+                    TsdDocumentSyncItem("row-1", 432, 9.0, 1)
+                )
+            )
+        )
+        assertEquals(409, second.code())
+        assertEquals(1, fakeServer.documentElements[990]?.size)
+        assertEquals(3.0, fakeServer.stockMovedByDocument[990] ?: 0.0, 0.001)
+        assertEquals(1, fakeServer.conductCalls.get())
+    }
+
+    @Test
+    fun `CX-10 SERVER_GUARDED unavailable lock API stops safely without REST fallback`() = runBlocking {
+        fakeServer.tsdGuardEnabled = false
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.seedDraftDocument(1001)
+        val item = comingProduct(51, "Труба 63", "4600000001001", 1.0)
+        val (_, service) = newIsolatedClient(fakeServer, "tsd_cx10", BitrixConcurrencyMode.SERVER_GUARDED)
+        val result = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 1001, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertFalse(result.isSuccess)
+        assertTrue(result.message.orEmpty().contains("заблокировано") || result.message.orEmpty().contains("недоступна"))
+        assertEquals(0, fakeServer.offerAddCalls.get())
+        assertEquals(0, fakeServer.barcodeSetCalls.get())
+        assertEquals(0, fakeServer.elementAddCalls.get())
+        assertEquals(0, fakeServer.conductCalls.get())
+        assertEquals("N", fakeServer.documentStatuses[1001])
+        assertTrue("Guarded client must call tsd.variation.resolveOrCreate", fakeServer.tsdVariationCalls.get() >= 1)
+    }
+
+    @Test
+    fun `CX-11 SERVER_GUARDED timeout after variation create recovers without a second offer`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.throwAfterTsdVariationCommit = true
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.seedDraftDocument(1011)
+        val item = comingProduct(51, "Труба 63", "4600000001011", 2.0)
+        val engine = FileBackedDraftStorageEngine(tempFolder.newFolder("tsd_cx11"))
+        val repo = ComingDraftRepository(engine)
+        val service = CatalogDocumentComingService(
+            apiBitrix = fakeServer, apiBarcode = fakeServer, draftRepository = repo,
+            isolateProcessLocks = true, concurrencyMode = BitrixConcurrencyMode.SERVER_GUARDED
+        )
+        val first = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 1011, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertFalse(first.isSuccess)
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, first.state)
+        assertEquals(1, fakeServer.offerAddCalls.get())
+        assertEquals(1, fakeServer.offersById.size)
+        val retry = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 1011, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertTrue(retry.message, retry.isSuccess)
+        assertEquals(1, fakeServer.offerAddCalls.get())
+        assertEquals(1, fakeServer.offersById.size)
+        assertEquals(1, fakeServer.documentElements[1011]?.size)
+        assertEquals(2.0, fakeServer.stockMovedByDocument[1011] ?: 0.0, 0.001)
+    }
+
+    @Test
+    fun `CX-12 SERVER_GUARDED timeout after row add recovers without duplicate stock`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.throwAfterTsdDocumentRowCommit = true
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.seedDraftDocument(1021)
+        val item = comingProduct(51, "Труба 63", "4600000001021", 8.0)
+        val engine = FileBackedDraftStorageEngine(tempFolder.newFolder("tsd_cx12"))
+        val repo = ComingDraftRepository(engine)
+        val service = CatalogDocumentComingService(
+            apiBitrix = fakeServer, apiBarcode = fakeServer, draftRepository = repo,
+            isolateProcessLocks = true, concurrencyMode = BitrixConcurrencyMode.SERVER_GUARDED
+        )
+        val first = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 1021, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertFalse(first.isSuccess)
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, first.state)
+        assertEquals(1, fakeServer.documentElements[1021]?.size)
+        assertEquals(null, fakeServer.stockMovedByDocument[1021])
+        val retry = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 1021, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertTrue(retry.message, retry.isSuccess)
+        assertEquals(1, fakeServer.documentElements[1021]?.size)
+        assertEquals(8.0, fakeServer.stockMovedByDocument[1021] ?: 0.0, 0.001)
+        assertEquals(1, fakeServer.conductCalls.get())
+        assertEquals(1, fakeServer.offerAddCalls.get())
+    }
+
     private fun newIsolatedClient(
         server: FakeBitrixPortal,
-        folder: String
+        folder: String,
+        concurrencyMode: BitrixConcurrencyMode = BitrixConcurrencyMode.LEGACY
     ): Pair<ComingDraftRepository, CatalogDocumentComingService> {
         val engine = FileBackedDraftStorageEngine(tempFolder.newFolder(folder))
         val repo = ComingDraftRepository(engine)
@@ -902,7 +1212,8 @@ class CatalogDocumentComingServiceTest {
             apiBitrix = server,
             apiBarcode = server,
             draftRepository = repo,
-            isolateProcessLocks = true
+            isolateProcessLocks = true,
+            concurrencyMode = concurrencyMode
         )
         return repo to service
     }
@@ -988,7 +1299,46 @@ class CatalogDocumentComingServiceTest {
         var elementAddRaceParticipants: Int = 0
         private val elementAddEntered = AtomicInteger(0)
 
+        @Volatile
+        var elementListRaceParticipants: Int = 0
+        private val elementListEntered = AtomicInteger(0)
+
+        /**
+         * When true, `tsd.*` methods implement portal GET_LOCK semantics.
+         * Default false: SERVER_GUARDED clients receive HTTP 404 (no silent REST fallback).
+         */
+        @Volatile
+        var tsdGuardEnabled: Boolean = false
+
+        @Volatile
+        var throwOnNextTsdVariation: Boolean = false
+
+        @Volatile
+        var throwAfterTsdVariationCommit: Boolean = false
+
+        @Volatile
+        var throwAfterTsdDocumentRowCommit: Boolean = false
+
+        @Volatile
+        var throwOnNextTsdDocument: Boolean = false
+
+        val tsdVariationCalls = AtomicInteger(0)
+        val tsdDocumentCalls = AtomicInteger(0)
+        val stockByOfferId = ConcurrentHashMap<Int, Double>()
+        val stockMovedByDocument = ConcurrentHashMap<Int, Double>()
+
+        private val tsdOps = ConcurrentHashMap<String, TsdOpRecord>()
+        private val barcodeGuard = Any()
+        private val documentGuard = Any()
         private val statusLock = Any()
+
+        private data class TsdOpRecord(
+            val key: String,
+            val payload: String,
+            var state: String,
+            var offerId: Int? = null,
+            var documentResult: TsdDocumentSyncResponse.Result? = null
+        )
 
         fun seedDraftDocument(docId: Int, status: String = "N") {
             documentStatuses[docId] = status
@@ -1048,6 +1398,14 @@ class CatalogDocumentComingServiceTest {
         }
 
         override suspend fun getDocumentProducts(list: CatalogDocumentElementListRequest): Response<CatalogDocumentElementListResponse> {
+            val raceN = elementListRaceParticipants
+            if (raceN > 0) {
+                elementListEntered.incrementAndGet()
+                val deadline = System.currentTimeMillis() + 1500L
+                while (elementListEntered.get() < raceN && System.currentTimeMillis() < deadline) {
+                    delay(5L)
+                }
+            }
             val docId = (list.filter["docId"] as? Number)?.toInt() ?: 0
             val rows = documentElements[docId]?.map { copyTreeMap(it) } ?: emptyList()
             return Response.success(CatalogDocumentElementListResponse(hashMapOf("documentElements" to rows)))
@@ -1163,6 +1521,7 @@ class CatalogDocumentComingServiceTest {
                     true
                 } else {
                     documentStatuses[request.id] = "Y"
+                    applyStockForDocumentLocked(request.id)
                     false
                 }
             }
@@ -1276,6 +1635,272 @@ class CatalogDocumentComingServiceTest {
 
         override suspend fun getSecondBlanks(request: BlankRequest): SecondBlankResponse =
             throw UnsupportedOperationException()
+
+        override suspend fun tsdVariationResolveOrCreate(
+            request: TsdVariationResolveRequest
+        ): Response<TsdVariationResolveResponse> {
+            tsdVariationCalls.incrementAndGet()
+            if (!tsdGuardEnabled) {
+                return Response.error(404, jsonError("NOT_FOUND", "tsd.variation.resolveOrCreate missing"))
+            }
+            if (throwOnNextTsdVariation) {
+                throwOnNextTsdVariation = false
+                throw SocketTimeoutException("timeout before tsd.variation.resolveOrCreate")
+            }
+            val barcode = request.barcode?.trim().orEmpty()
+            val payload = "${request.parentProductId}|$barcode|${request.localItemId}"
+            val opKey = "V:${request.operationId}:${request.localItemId}"
+            synchronized(barcodeGuard) {
+                val existingOp = tsdOps[opKey]
+                if (existingOp != null && existingOp.state == "COMMITTED") {
+                    if (existingOp.payload != payload) {
+                        return conflict("OPERATION_PAYLOAD_CONFLICT", "operationId reused with different variation payload")
+                    }
+                    return Response.success(
+                        TsdVariationResolveResponse(
+                            result = TsdVariationResolveResponse.Result(
+                                offerId = existingOp.offerId ?: 0,
+                                barcode = barcode,
+                                created = false,
+                                operationId = request.operationId
+                            )
+                        )
+                    )
+                }
+                tsdOps[opKey] = TsdOpRecord(opKey, payload, "STARTED")
+                if (barcode.isNotEmpty()) {
+                    val bound = barcodeToOfferId[barcode]
+                    if (bound != null) {
+                        val parent = parentIdOfOffer(bound)
+                        if (parent != null && parent != request.parentProductId) {
+                            tsdOps.remove(opKey)
+                            return conflict("BARCODE_FOREIGN_CONFLICT", "barcode owned by parent $parent")
+                        }
+                        tsdOps[opKey] = TsdOpRecord(opKey, payload, "COMMITTED", offerId = bound)
+                        return Response.success(
+                            TsdVariationResolveResponse(
+                                result = TsdVariationResolveResponse.Result(
+                                    offerId = bound,
+                                    barcode = barcode,
+                                    created = false,
+                                    operationId = request.operationId
+                                )
+                            )
+                        )
+                    }
+                }
+                val created = createOfferLocked(request.parentProductId, request.offerFields["name"]?.toString().orEmpty())
+                if (barcode.isNotEmpty()) {
+                    barcodeToOfferId.putIfAbsent(barcode, created)
+                    val winner = barcodeToOfferId[barcode]!!
+                    tsdOps[opKey] = TsdOpRecord(opKey, payload, "COMMITTED", offerId = winner)
+                    if (throwAfterTsdVariationCommit) {
+                        throwAfterTsdVariationCommit = false
+                        throw SocketTimeoutException("timeout after tsd.variation.resolveOrCreate committed")
+                    }
+                    return Response.success(
+                        TsdVariationResolveResponse(
+                            result = TsdVariationResolveResponse.Result(
+                                offerId = winner,
+                                barcode = barcode,
+                                created = winner == created,
+                                operationId = request.operationId
+                            )
+                        )
+                    )
+                }
+                tsdOps[opKey] = TsdOpRecord(opKey, payload, "COMMITTED", offerId = created)
+                return Response.success(
+                    TsdVariationResolveResponse(
+                        result = TsdVariationResolveResponse.Result(
+                            offerId = created,
+                            barcode = barcode,
+                            created = true,
+                            operationId = request.operationId
+                        )
+                    )
+                )
+            }
+        }
+
+        override suspend fun tsdDocumentSyncAndConduct(
+            request: TsdDocumentSyncRequest
+        ): Response<TsdDocumentSyncResponse> {
+            tsdDocumentCalls.incrementAndGet()
+            if (!tsdGuardEnabled) {
+                return Response.error(404, jsonError("NOT_FOUND", "tsd.document.syncAndConduct missing"))
+            }
+            if (throwOnNextTsdDocument) {
+                throwOnNextTsdDocument = false
+                throw SocketTimeoutException("timeout before tsd.document.syncAndConduct")
+            }
+            val payload = request.items.sortedBy { it.localItemId }.joinToString(";") {
+                "${it.localItemId}:${it.offerId}:${it.quantity}:${it.storeTo}:${it.batchNumber.orEmpty()}"
+            }
+            val opKey = "D:${request.operationId}:${request.documentId}"
+            synchronized(documentGuard) {
+                val existingOp = tsdOps[opKey]
+                if (existingOp?.state == "COMMITTED" && existingOp.documentResult != null) {
+                    if (existingOp.payload != payload) {
+                        return conflictDoc("OPERATION_PAYLOAD_CONFLICT", "operationId reused with different document payload")
+                    }
+                    return Response.success(TsdDocumentSyncResponse(result = existingOp.documentResult))
+                }
+                tsdOps[opKey] = TsdOpRecord(opKey, payload, "STARTED")
+                if (documentStatuses[request.documentId] == "Y") {
+                    val already = buildDocumentResult(request, alreadyConducted = true)
+                    tsdOps[opKey] = TsdOpRecord(opKey, payload, "COMMITTED", documentResult = already)
+                    return Response.success(TsdDocumentSyncResponse(result = already))
+                }
+                request.deletedRemoteElementIds.forEach { delId ->
+                    documentElements[request.documentId]?.removeAll { (it["id"] as? Number)?.toInt() == delId }
+                }
+                val rows = documentElements.getOrPut(request.documentId) {
+                    Collections.synchronizedList(mutableListOf())
+                }
+                val syncedItems = mutableListOf<TsdDocumentSyncResponse.SyncedItem>()
+                val elementIds = mutableListOf<Int>()
+                for (item in request.items) {
+                    val existingRow = rows.firstOrNull { row ->
+                        row["localItemId"] == item.localItemId && row["operationId"] == request.operationId
+                    }
+                    if (existingRow != null) {
+                        val rowId = (existingRow["id"] as Number).toInt()
+                        existingRow["amount"] = item.quantity
+                        existingRow["storeTo"] = item.storeTo.toDouble()
+                        existingRow["elementId"] = item.offerId.toDouble()
+                        if (item.batchNumber != null) existingRow["batchNumber"] = item.batchNumber
+                        elementIds.add(rowId)
+                        syncedItems.add(
+                            TsdDocumentSyncResponse.SyncedItem(
+                                localItemId = item.localItemId,
+                                offerId = item.offerId,
+                                elementId = rowId,
+                                quantity = item.quantity
+                            )
+                        )
+                        continue
+                    }
+                    val newId = nextDocElementId.incrementAndGet()
+                    elementAddCalls.incrementAndGet()
+                    val row = LinkedTreeMap<String, Any?>().apply {
+                        put("id", newId.toDouble())
+                        put("docId", request.documentId.toDouble())
+                        put("elementId", item.offerId.toDouble())
+                        put("storeFrom", 0.0)
+                        put("storeTo", item.storeTo.toDouble())
+                        put("amount", item.quantity)
+                        put("localItemId", item.localItemId)
+                        put("operationId", request.operationId)
+                        put("batchNumber", item.batchNumber)
+                    }
+                    rows.add(row)
+                    if (throwAfterTsdDocumentRowCommit) {
+                        throwAfterTsdDocumentRowCommit = false
+                        throw SocketTimeoutException("timeout after tsd document row add")
+                    }
+                    elementIds.add(newId)
+                    syncedItems.add(
+                        TsdDocumentSyncResponse.SyncedItem(
+                            localItemId = item.localItemId,
+                            offerId = item.offerId,
+                            elementId = newId,
+                            quantity = item.quantity
+                        )
+                    )
+                }
+                synchronized(statusLock) {
+                    if (documentStatuses[request.documentId] != "Y") {
+                        documentStatuses[request.documentId] = "Y"
+                        applyStockForDocumentLocked(request.documentId)
+                        conductCalls.incrementAndGet()
+                    }
+                }
+                val result = TsdDocumentSyncResponse.Result(
+                    documentId = request.documentId,
+                    status = "Y",
+                    alreadyConducted = false,
+                    elementIds = elementIds,
+                    items = syncedItems,
+                    operationId = request.operationId
+                )
+                tsdOps[opKey] = TsdOpRecord(opKey, payload, "COMMITTED", documentResult = result)
+                return Response.success(TsdDocumentSyncResponse(result = result))
+            }
+        }
+
+        private fun applyStockForDocumentLocked(docId: Int) {
+            if (stockMovedByDocument.containsKey(docId)) return
+            var total = 0.0
+            documentElements[docId]?.forEach { row ->
+                val offerId = (row["elementId"] as? Number)?.toInt() ?: return@forEach
+                val amount = when (val raw = row["amount"]) {
+                    is Number -> raw.toDouble()
+                    else -> raw?.toString()?.toDoubleOrNull() ?: 0.0
+                }
+                stockByOfferId.merge(offerId, amount) { a, b -> a + b }
+                total += amount
+            }
+            stockMovedByDocument[docId] = total
+        }
+
+        private fun createOfferLocked(parentId: Int, name: String): Int {
+            offerAddCalls.incrementAndGet()
+            val newId = nextOfferId.incrementAndGet()
+            val map = LinkedTreeMap<String, Any?>().apply {
+                put("id", newId.toDouble())
+                put("iblockId", 15.0)
+                put("name", name)
+                put("parentId", LinkedTreeMap<String, Any?>().apply { put("value", parentId.toDouble()) })
+            }
+            offersById[newId] = map
+            return newId
+        }
+
+        private fun parentIdOfOffer(offerId: Int): Int? {
+            val offer = offersById[offerId] ?: return null
+            return ((offer["parentId"] as? LinkedTreeMap<*, *>)?.get("value") as? Number)?.toInt()
+        }
+
+        private fun jsonError(code: String, description: String): ResponseBody {
+            return ResponseBody.create(
+                MediaType.parse("application/json"),
+                """{"error":"$code","error_description":"$description"}"""
+            )
+        }
+
+        private fun <T> conflict(code: String, description: String): Response<T> {
+            return Response.error(409, jsonError(code, description))
+        }
+
+        private fun conflictDoc(code: String, description: String): Response<TsdDocumentSyncResponse> {
+            return Response.error(409, jsonError(code, description))
+        }
+
+        private fun buildDocumentResult(
+            request: TsdDocumentSyncRequest,
+            alreadyConducted: Boolean
+        ): TsdDocumentSyncResponse.Result {
+            val rows = documentElements[request.documentId].orEmpty()
+            val items = request.items.map { item ->
+                val row = rows.firstOrNull { it["localItemId"] == item.localItemId }
+                val rowId = (row?.get("id") as? Number)?.toInt() ?: 0
+                TsdDocumentSyncResponse.SyncedItem(
+                    localItemId = item.localItemId,
+                    offerId = item.offerId,
+                    elementId = rowId,
+                    quantity = item.quantity
+                )
+            }
+            return TsdDocumentSyncResponse.Result(
+                documentId = request.documentId,
+                status = documentStatuses[request.documentId] ?: "Y",
+                alreadyConducted = alreadyConducted,
+                elementIds = items.map { it.elementId }.filter { it > 0 },
+                items = items,
+                operationId = request.operationId
+            )
+        }
     }
 
     private class FailingSnapshotEngine(
