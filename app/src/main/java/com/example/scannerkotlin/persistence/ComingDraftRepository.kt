@@ -240,6 +240,10 @@ class ComingDraftRepository(
             try {
                 val now = System.currentTimeMillis()
                 val existing = engine.loadComingDraft(documentId)
+                val previousByLocalId = existing?.items?.associateBy { it.localItemId }.orEmpty()
+                val mergedItems = products.map { incoming ->
+                    mergeIncomingWithPersistedRemoteState(incoming, previousByLocalId[incoming.localItemId])
+                }
                 val record = ComingDocumentDraftRecord(
                     documentId = documentId,
                     operationId = existing?.operationId ?: UUID.randomUUID().toString(),
@@ -255,7 +259,7 @@ class ComingDraftRepository(
                     createdAtMs = existing?.createdAtMs ?: now,
                     updatedAtMs = now,
                     lastActiveAtMs = now,
-                    items = products.map { it.detachedCopy(preserveLocalItemId = true) },
+                    items = mergedItems,
                     deletedRemoteElementIds = (existing?.deletedRemoteElementIds.orEmpty() + deletedRemoteIds).distinct()
                 )
                 engine.saveFullComingDraft(record)
@@ -332,17 +336,15 @@ class ComingDraftRepository(
         validationError: String? = null
     ) = withContext(ioDispatcher) {
         writeMutex.withLock {
-            engine.updateItemRemoteIdentifiers(
+            engine.recordItemAndJournalAtomically(
                 documentId = documentId,
                 localItemId = localItemId,
                 offerId = offerId,
                 idInDocument = idInDocument,
                 itemStatus = itemStatus,
                 syncState = syncState,
-                validationError = validationError
-            )
-            engine.appendStepJournal(
-                OperationStepJournalEntry(
+                validationError = validationError,
+                journalEntry = OperationStepJournalEntry(
                     operationId = operationId,
                     documentId = documentId,
                     localItemId = localItemId,
@@ -410,6 +412,33 @@ class ComingDraftRepository(
         writeMutex.withLock {
             engine.getStepJournal(operationId)
         }
+    }
+
+    /**
+     * Incoming UI state may omit offerId/idInDocument after a crash/retry. Never wipe
+     * already persisted remote identifiers or regress item progress.
+     */
+    private fun mergeIncomingWithPersistedRemoteState(incoming: Product, previous: Product?): Product {
+        val copy = incoming.detachedCopy(preserveLocalItemId = true)
+        if (previous == null) return copy
+        if (copy.offerId == null) copy.offerId = previous.offerId
+        if (copy.idInDocument == null) copy.idInDocument = previous.idInDocument
+        if (itemStatusRank(previous.itemStatus) > itemStatusRank(copy.itemStatus)) {
+            copy.itemStatus = previous.itemStatus
+            copy.syncState = previous.syncState
+        }
+        return copy
+    }
+
+    private fun itemStatusRank(status: ComingItemStatus): Int = when (status) {
+        ComingItemStatus.PENDING -> 0
+        ComingItemStatus.VALIDATED -> 1
+        ComingItemStatus.VARIATION_RESOLVED -> 2
+        ComingItemStatus.BARCODE_ASSIGNED -> 3
+        ComingItemStatus.ELEMENT_ADDED -> 4
+        ComingItemStatus.METADATA_UPDATED -> 5
+        ComingItemStatus.COMMITTED -> 6
+        ComingItemStatus.ERROR -> 0
     }
 
     companion object {

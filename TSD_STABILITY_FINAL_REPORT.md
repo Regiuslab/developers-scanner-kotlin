@@ -1,6 +1,6 @@
 # ИТОГОВЫЙ ТЕХНИЧЕСКИЙ ОТЧЁТ ПО СТАБИЛИЗАЦИИ ПРИЛОЖЕНИЯ ТСД (`TSD_STABILITY_FINAL_REPORT.md`)
 
-**Дата:** 22.11.2026  
+**Дата:** 22.11.2026 (обновлено вечером: дополнительный code review перед запуском)  
 **Проект:** `ScannerKotlin` (`com.example.scannerkotlin`, `minSdk = 24`, `targetSdk = 35`, `compileSdk = 35`)  
 **Связанный документ аудита:** `AUDIT_REPORT.md`
 
@@ -94,6 +94,9 @@
 | `app/src/main/java/com/example/scannerkotlin/activities/AuthActivity.kt`, `ScanActivity.kt`, `SgpActivity.kt`, `OtkActivity.kt`, `service/UserService.kt`, `SgpService.kt`, `CatalogDocumentMovingService.kt` | Удалено логирование PIN, исправлен цикл при неизвестной роли, исправлены `IndexOutOfBoundsException`, `notifyItemRangeChanged`, `BarcodeScanGate` и проверки жизненного цикла диалогов | Этапы 3, 12.D, 14 | Готово |
 | `app/src/debug/java/com/example/scannerkotlin/debug/ComingLayoutFixtureActivity.kt`, `app/build.gradle.kts` | Debug-only фикстура для стресс-тестов и принудительного crash (исключена из `release`-сборки), настройка unit-тестов | Этапы 9, 12.B | Готово |
 | `app/src/test/...` (3 тестовых класса) и `app/src/androidTest/.../SqlitePersistenceAndMigrationInstrumentedTest.kt` | Полный набор unit-, интеграционных (FakeBitrixPortal), стресс-, секьюрити- и инструментальных SQLite/UI-тестов | Этап 9 | Готово |
+| `CatalogDocumentComingService.kt` (`conductDocumentSuspend`, `preValidateOnServerBeforeMutation`, `executeConductAndVerify`, `saveProductVariationsInternal`) | Блокировка проведения при `SaveOutcome.Failed` и `DocumentServerStatus.Unverified`; ошибки после мутаций → `RECONCILIATION_REQUIRED` | Follow-up code review | Готово |
+| `ComingDraftRepository.saveSnapshot` / `recordItemStepProgress` | Слияние `offerId`/`idInDocument` при повторном снимке; атомарная запись позиции и журнала | Follow-up §5 | Готово |
+| `SqliteDraftStorageEngine.recordItemAndJournalAtomically`, `FileBackedDraftStorageEngine.recordItemAndJournalAtomically` | Одна транзакция / один `persistLocked` на пару item+journal | Follow-up §5 | Готово |
 
 ---
 
@@ -144,6 +147,12 @@
 | **IC-12** | Конкурентные операции с двух ТСД | **PASS** | `CatalogDocumentComingServiceTest.IC-12 and IC-14` (на уровне API Битрикс: второй ТСД обнаруживает `status=="Y"` до добавления элементов и не дублирует остатки; ограничение атомарности `offer.add` на стороне Битрикс описано в 17.8) |
 | **IC-13** | Перезапуск приложения после частичного выполнения | **PASS** | `CatalogDocumentComingServiceTest.IC-10 IC-11 IC-13`: холодный перезапуск переводит `PROCESSING` → `RECONCILIATION_REQUIRED`, повторное проведение завершает операцию без дублей |
 | **IC-14** | Использование устаревшего локального кэша | **PASS** | `CatalogDocumentComingServiceTest.IC-12 and IC-14` + `ComingDraftPersistenceAndStressTest`: критичные проверки игнорируют устаревший `CatalogReferenceCache`, а очистка кэша не затрагивает черновики |
+| **RV-01** | Ошибка SQLite `saveSnapshot` перед проведением | **PASS** | `CatalogDocumentComingServiceTest.RV-01`: 0 вызовов `offer.add`/`barcode.set`/`element.add`/`conduct`, черновик сохранён |
+| **RV-02** | `DocumentServerStatus.Unverified` блокирует мутации | **PASS** | `CatalogDocumentComingServiceTest.RV-02`: `RECONCILIATION_REQUIRED`, 0 мутаций |
+| **RV-03** | Ошибка после `offer.add` + холодный рестарт | **PASS** | `CatalogDocumentComingServiceTest.RV-03`: сверка, повтор без второй вариации |
+| **RV-04** | Ошибка после `barcode.setbyproductid` | **PASS** | `CatalogDocumentComingServiceTest.RV-04`: повтор не дублирует bind |
+| **RV-05** | Ошибка после `element.add` | **PASS** | `CatalogDocumentComingServiceTest.RV-05`: повтор не добавляет вторую строку |
+| **RV-06** | `Unverified` после фактического `conduct` | **PASS** | `CatalogDocumentComingServiceTest.RV-06`: не `COMMITTED` с первого ответа; повтор сверяет `status=Y` без второго `conduct` |
 
 ### D. Регрессионные и миграционные тесты (Раздел 12.D)
 
@@ -151,7 +160,7 @@
 |---|---|---|---|
 | **RG-01** | Авторизация по PIN и отсутствие утечки секретов в логи | **PASS** | `RegressionAndSecuritySuiteTest` (`UserService`, `TsdLogger` redaction) + холодный старт `AuthActivity` на эмуляторе |
 | **RG-02** | Миграция локальной БД `v1 → v2` при обновлении приложения | **PASS** | `SqlitePersistenceAndMigrationInstrumentedTest.sqliteSchemaMigrationV1ToV2PreservesAllDraftsAndItems` на Android 17 |
-| **RG-03** | Перемещения, остатки, мапперы документов и номенклатуры | **PASS** | Существующие и новые тесты (`MovingConductRetrySyncTest`, `MovingDocumentStateMergerTest`, `MovingAvailabilityDisplayTest`, `ComingProductValidatorTest`, `RegressionAndSecuritySuiteTest`) — всего **45/45 JVM unit-тестов PASS** и **4/4 Android instrumentation-тестов PASS** |
+| **RG-03** | Перемещения, остатки, мапперы документов и номенклатуры | **PASS** | Существующие и новые тесты (`MovingConductRetrySyncTest`, `MovingDocumentStateMergerTest`, `MovingAvailabilityDisplayTest`, `ComingProductValidatorTest`, `RegressionAndSecuritySuiteTest`) — всего **53/53 JVM unit-тестов PASS** (прогон 22.11.2026 вечер). Повторный `connectedDebugAndroidTest` в этой итерации: **NOT RUN** (ADB: ни одного устройства) |
 | **RG-04** | Сборка `Debug` и `Release` APK + `lintVitalRelease` | **PASS** | `.\gradlew.bat testDebugUnitTest assembleDebug assembleRelease compileDebugAndroidTestKotlin` — `BUILD SUCCESSFUL` |
 | **RG-05** | Физический лазерный сканер Xcheng и живой Staging Битрикс24 | **NOT RUN** | Нет физического ТСД и отдельного непроизводственного портала Битрикс24 в среде разработки |
 
@@ -223,3 +232,69 @@
    - отсканировать физическим лазером 50 товаров в документ прихода и перезагрузить ТСД кнопкой питания (`CR-03`), убедиться в автовосстановлении всех 50 позиций;
    - проверить проведение документа из 10 позиций с заведомо конфликтным штрихкодом на 10-й позиции, исправить её и провести документ повторно на staging-портале Битрикс, сверив отсутствие дублей вариаций и корректность складских остатков.
 3. Вынести боевые webhook-ключи из дефолтов `app/build.gradle.kts` в `bitrix.properties` / переменные окружения сборки и настроить релизную подпись APK (`signingConfig`).
+
+---
+
+## 17.10. Дополнительный аудит перед запуском (code review)
+
+### 1. Подтверждённые проблемы
+
+| ID | Проблема | Доказательство в коде | Критичность |
+|---|---|---|---|
+| **RV-A** | `conductDocumentSuspend()` игнорировал `SaveOutcome` от `draftRepository.saveSnapshot(...)`. При ошибке SQLite проведение уходило в Битрикс. | `CatalogDocumentComingService.conductDocumentSuspend` (вызов `saveSnapshot` без проверки результата) | **CRITICAL** |
+| **RV-B** | `DocumentServerStatus.Unverified` (null/неполный ответ `catalog.document.list`) трактовался как «можно продолжать» и даже как успешный `COMMITTED` после HTTP 200 `conduct`. Логика, введённая ради неполных mock API, ослабляла production-проверки. | `preValidateOnServerBeforeMutation`, `reconcileDocumentWithServerSuspend`, `executeConductAndVerify` | **CRITICAL** |
+| **RV-C** | После начала серверных мутаций (`offer.add`, `barcode.setbyproductid`, `element.add`, `conduct`) исключения переводили черновик в `FAILED`, а не в `RECONCILIATION_REQUIRED`. Повтор мог создать сущности повторно при неизвестном результате. | `saveProductVariationsInternal` catch, `syncDocumentElementsIdempotently`, внешний `catch` `conductDocumentSuspend` | **CRITICAL** |
+| **RV-D** | `recordItemStepProgress` писал `offerId` и строку журнала двумя отдельными SQLite/file транзакциями. Падение между ними давало рассинхрон. `saveSnapshot` мог затереть уже сохранённый `offerId` in-memory копией без него. | `ComingDraftRepository.recordItemStepProgress`, `saveSnapshot` | **HIGH** |
+
+### 2. Что исправлено
+
+- Если `saveSnapshot` вернул `SaveOutcome.Failed`, проведение **немедленно блокируется**: 0 вызовов `offer.add` / `barcode.set` / `element.add` / `conduct`. Черновик не уничтожается.
+- `Unverified` больше не разрешает изменяющие операции. Mock `FakeBitrixPortal` всегда возвращает полноценный `documents[]`; тест `RV-02` специально отдаёт пустой `result` и ожидает блокировку.
+- После любой серверной мутации или неопределённого I/O результат классифицируется как `RECONCILIATION_REQUIRED`. Повтор идёт через сверку и переиспользует `offerId` / строки документа.
+- Позиция и журнал пишутся атомарно (`recordItemAndJournalAtomically`). `saveSnapshot` сливает входящий UI-снимок с уже сохранёнными `offerId` / `idInDocument`.
+
+### 3. Изменённые классы и методы
+
+- `CatalogDocumentComingService.conductDocumentSuspend`
+- `CatalogDocumentComingService.persistFailedConduct` (новый)
+- `CatalogDocumentComingService.preValidateOnServerBeforeMutation`
+- `CatalogDocumentComingService.reconcileDocumentWithServerSuspend`
+- `CatalogDocumentComingService.executeConductAndVerify`
+- `CatalogDocumentComingService.saveProductVariationsInternal`
+- `CatalogDocumentComingService.addVariationOfProductSuspend` / `setBarcodeForProductSuspend`
+- `CatalogDocumentComingService.syncDocumentElementsIdempotently` / `deleteDocumentElementsByIdSuspend`
+- `ComingDraftRepository.saveSnapshot` / `recordItemStepProgress` / `mergeIncomingWithPersistedRemoteState`
+- `DraftStorageEngine.recordItemAndJournalAtomically`
+- `SqliteDraftStorageEngine.recordItemAndJournalAtomically`
+- `FileBackedDraftStorageEngine.recordItemAndJournalAtomically`
+- `ConductResult.SaveResult.Failure.requiresReconciliation`
+
+### 4. Добавленные тесты
+
+- `RV-01` — ошибка SQLite перед проведением блокирует Битрикс, черновик цел
+- `RV-02` — `Unverified` статус документа блокирует мутации
+- `RV-03` — ошибка после `offer.add` → сверка, повтор без второй вариации, холодный рестарт
+- `RV-04` — ошибка после `barcode.setbyproductid` → сверка, штрихкод не дублируется
+- `RV-05` — ошибка после `element.add` → сверка, остатки не удваиваются
+- `RV-06` — `Unverified` после фактического `conduct` не ставит `COMMITTED`; повтор сверяет `status=Y`
+- Атомарность item+journal и merge `offerId` в `ComingDraftPersistenceAndStressTest`
+- Инструментальный `sqliteRecordItemAndJournalAtomicallyPersistsOfferIdWithMatchingJournalRow`
+
+### 5. Реальные результаты этой итерации
+
+| Проверка | Результат | Доказательство |
+|---|---|---|
+| `testDebugUnitTest` | **PASS** 53/53, 0 failed | Gradle XML `app/build/test-results/testDebugUnitTest/` (в т.ч. 14 тестов `CatalogDocumentComingServiceTest`) |
+| `assembleDebug` / `assembleRelease` | **PASS** | `BUILD SUCCESSFUL` |
+| `connectedDebugAndroidTest` (новый атомарный SQLite-тест) | **NOT RUN** | `adb devices` пуст, эмулятор не подключён |
+| Стресс 100/500/1000 (JVM, повторный прогон в составе unit-тестов) | **PASS** | `ComingDraftPersistenceAndStressTest` 9/9 |
+| Стресс/миграция SQLite на эмуляторе (повтор этой итерации) | **NOT RUN** | нет устройства; предыдущий прогон 22.11 утром остаётся в силе |
+
+### 6. Остаточные риски
+
+- REST Битрикс24 по-прежнему без серверной транзакции на цепочку `offer.add` + `barcode.set` + `element.add` + `conduct`. На одном ТСД параллельное проведение одного документа блокируется `Mutex` (`IC-07/IC-08` PASS). Два физических ТСД с одним новым штрихкодом в одном окне по-прежнему требуют уникальный индекс/блокировку на портале.
+- Физический ТСД Xcheng и живой staging-портал не проверялись в этой итерации.
+
+### 7. Готовность
+
+**`READY FOR STAGING`** — без изменения. `READY FOR PILOT` по-прежнему требует физический ТСД и тестовый (не боевой) Битрикс.

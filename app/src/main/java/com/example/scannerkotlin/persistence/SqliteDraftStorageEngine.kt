@@ -485,6 +485,42 @@ class SqliteDraftStorageEngine(
         }
     }
 
+    override fun recordItemAndJournalAtomically(
+        documentId: Int,
+        localItemId: String,
+        offerId: Int?,
+        idInDocument: Int?,
+        itemStatus: ComingItemStatus,
+        syncState: ComingSyncState,
+        validationError: String?,
+        journalEntry: OperationStepJournalEntry
+    ) = synchronized(lock) {
+        val db = writableDatabase
+        val now = System.currentTimeMillis()
+        db.beginTransactionNonExclusive()
+        try {
+            val cv = ContentValues().apply {
+                if (offerId != null) put("offer_id", offerId)
+                if (idInDocument != null) put("id_in_document", idInDocument)
+                put("item_status", itemStatus.name)
+                put("sync_state", syncState.name)
+                if (validationError == null) putNull("validation_error") else put("validation_error", validationError)
+                put("updated_at_ms", now)
+            }
+            db.update(
+                TABLE_COMING_ITEMS,
+                cv,
+                "document_id = ? AND local_item_id = ?",
+                arrayOf(documentId.toString(), localItemId)
+            )
+            touchDraftTimestampsInternal(db, documentId, now)
+            insertStepJournalInternal(db, journalEntry)
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+    }
+
     override fun removeComingItem(
         documentId: Int,
         localItemId: String,

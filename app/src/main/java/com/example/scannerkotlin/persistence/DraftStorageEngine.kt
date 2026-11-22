@@ -82,6 +82,32 @@ interface DraftStorageEngine {
         validationError: String? = null
     )
 
+    /**
+     * Persists item remote identifiers and the matching journal row in a single atomic write.
+     * A crash cannot leave offerId/idInDocument saved without the journal entry, or vice versa.
+     */
+    fun recordItemAndJournalAtomically(
+        documentId: Int,
+        localItemId: String,
+        offerId: Int?,
+        idInDocument: Int?,
+        itemStatus: ComingItemStatus,
+        syncState: ComingSyncState,
+        validationError: String? = null,
+        journalEntry: OperationStepJournalEntry
+    ) {
+        updateItemRemoteIdentifiers(
+            documentId = documentId,
+            localItemId = localItemId,
+            offerId = offerId,
+            idInDocument = idInDocument,
+            itemStatus = itemStatus,
+            syncState = syncState,
+            validationError = validationError
+        )
+        appendStepJournal(journalEntry)
+    }
+
     fun removeComingItem(documentId: Int, localItemId: String, remoteElementIdToDelete: Int?): ComingDocumentDraftRecord?
 
     fun updateDraftMetadata(

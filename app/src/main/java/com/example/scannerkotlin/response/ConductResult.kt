@@ -18,7 +18,8 @@ data class ConductResult(
         data class Failure(
             val errorMessage: String,
             val failedPositionIndex: Int? = null,
-            val isConflict: Boolean = false
+            val isConflict: Boolean = false,
+            val requiresReconciliation: Boolean = false
         ) : SaveResult()
     }
 }

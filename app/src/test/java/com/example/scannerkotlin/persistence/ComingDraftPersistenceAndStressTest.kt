@@ -1,7 +1,9 @@
 package com.example.scannerkotlin.persistence
 
 import com.example.scannerkotlin.cache.CatalogReferenceCache
+import com.example.scannerkotlin.model.ComingItemStatus
 import com.example.scannerkotlin.model.ComingOperationState
+import com.example.scannerkotlin.model.ComingSyncState
 import com.example.scannerkotlin.model.Product
 import com.example.scannerkotlin.model.SaveOutcome
 import com.example.scannerkotlin.model.Store
@@ -225,6 +227,77 @@ class ComingDraftPersistenceAndStressTest {
         assertNotNull(draft)
         assertEquals(1, draft!!.items.size)
         assertEquals("4609990000001", draft.items.first().barcode)
+    }
+
+    @Test
+    fun `RV-item-journal atomic persist recovers both offerId and journal after reload`() = runBlocking {
+        val dir = tempFolder.newFolder("atomic_item_journal")
+        val engine = FileBackedDraftStorageEngine(dir)
+        val repo = ComingDraftRepository(engine)
+        val item = sampleProduct(51, "Труба", "4600000000999", 2.0)
+        repo.saveSnapshot(
+            documentId = 777,
+            documentTitle = "Приход atomic",
+            destinationStoreId = 1,
+            allowedNomenclatureIds = null,
+            products = listOf(item),
+            comment = null
+        )
+        val localId = repo.getDraft(777)!!.items[0].localItemId
+        repo.recordItemStepProgress(
+            documentId = 777,
+            operationId = repo.getDraft(777)!!.operationId,
+            localItemId = localId,
+            offerId = 4321,
+            idInDocument = null,
+            itemStatus = ComingItemStatus.VARIATION_RESOLVED,
+            syncState = ComingSyncState.REMOTE_VARIATION_CREATED,
+            stepType = "CREATE_VARIATION",
+            stepStatus = "SUCCEEDED",
+            remoteEntityId = 4321,
+            details = "Created offerId=4321"
+        )
+
+        val reloaded = ComingDraftRepository(FileBackedDraftStorageEngine(dir))
+        val draft = reloaded.getDraft(777)
+        assertNotNull(draft)
+        assertEquals(4321, draft!!.items[0].offerId)
+        assertEquals(ComingItemStatus.VARIATION_RESOLVED, draft.items[0].itemStatus)
+        val journal = reloaded.getJournal(draft.operationId)
+        assertTrue(journal.any { it.stepType == "CREATE_VARIATION" && it.remoteEntityId == 4321 })
+    }
+
+    @Test
+    fun `saveSnapshot merge does not wipe persisted offerId from incoming UI copy`() = runBlocking {
+        val dir = tempFolder.newFolder("merge_offer")
+        val repo = ComingDraftRepository(FileBackedDraftStorageEngine(dir))
+        val original = sampleProduct(51, "Труба", "4600000000888", 1.0)
+        repo.saveSnapshot(51, "Приход", 1, null, listOf(original), null)
+        val localId = repo.getDraft(51)!!.items[0].localItemId
+        repo.recordItemStepProgress(
+            documentId = 51,
+            operationId = repo.getDraft(51)!!.operationId,
+            localItemId = localId,
+            offerId = 9009,
+            idInDocument = 7007,
+            itemStatus = ComingItemStatus.ELEMENT_ADDED,
+            syncState = ComingSyncState.REMOTE_ELEMENT_CREATED,
+            stepType = "ADD_ELEMENT",
+            stepStatus = "SUCCEEDED"
+        )
+
+        val uiCopy = sampleProduct(51, "Труба", "4600000000888", 4.0)
+        uiCopy.localItemId = localId
+        uiCopy.offerId = null
+        uiCopy.idInDocument = null
+        val outcome = repo.saveSnapshot(51, "Приход", 1, null, listOf(uiCopy), "updated qty")
+        assertTrue(outcome is SaveOutcome.Saved)
+
+        val merged = repo.getDraft(51)!!
+        assertEquals(9009, merged.items[0].offerId)
+        assertEquals(7007, merged.items[0].idInDocument)
+        assertEquals(4.0, merged.items[0].quantity!!, 0.0)
+        assertEquals(ComingItemStatus.ELEMENT_ADDED, merged.items[0].itemStatus)
     }
 
     @Test

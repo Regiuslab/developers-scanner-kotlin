@@ -20,6 +20,7 @@ import com.example.scannerkotlin.model.Document
 import com.example.scannerkotlin.model.DocumentElement
 import com.example.scannerkotlin.model.Product
 import com.example.scannerkotlin.model.ProductOffer
+import com.example.scannerkotlin.model.SaveOutcome
 import com.example.scannerkotlin.model.ValidationIssue
 import com.example.scannerkotlin.persistence.ComingDraftRepository
 import com.example.scannerkotlin.request.*
@@ -78,6 +79,24 @@ class CatalogDocumentComingService(
             val foreignElementsCount: Int
         ) : ReconciliationResult()
         data class Blocked(val reason: String, val keepReconciliationRequired: Boolean) : ReconciliationResult()
+    }
+
+    private data class MutationStepResult(
+        val success: Boolean,
+        val errorMessage: String? = null,
+        val outcomeUnknown: Boolean = false
+    )
+
+    private sealed class VariationCreateOutcome {
+        data class Created(val offerId: Int) : VariationCreateOutcome()
+        data class Rejected(val message: String) : VariationCreateOutcome()
+        data class Uncertain(val message: String) : VariationCreateOutcome()
+    }
+
+    private sealed class BarcodeBindOutcome {
+        data object Bound : BarcodeBindOutcome()
+        data object Rejected : BarcodeBindOutcome()
+        data class Uncertain(val message: String) : BarcodeBindOutcome()
     }
 
     /**
@@ -147,7 +166,17 @@ class CatalogDocumentComingService(
                 }
             }
             is DocumentServerStatus.Unverified -> {
-                // Allowed only when mock server does not stub document list.
+                draftRepository.appendJournal(
+                    operationId = opId,
+                    documentId = documentId,
+                    stepType = "RECONCILE_STATUS",
+                    status = "UNVERIFIED",
+                    details = "Authoritative document status could not be confirmed"
+                )
+                return@withContext ReconciliationResult.Blocked(
+                    reason = "Не удалось достоверно подтвердить статус документа №$documentId в Битрикс. Изменяющие операции заблокированы до сверки.",
+                    keepReconciliationRequired = true
+                )
             }
         }
 
@@ -277,7 +306,7 @@ class CatalogDocumentComingService(
             }
 
             // Ensure current in-memory state is persisted before any network action
-            draftRepository.saveSnapshot(
+            val snapshotOutcome = draftRepository.saveSnapshot(
                 documentId = idDocument,
                 documentTitle = draft.documentTitle,
                 destinationStoreId = destinationStoreId,
@@ -286,6 +315,21 @@ class CatalogDocumentComingService(
                 comment = documentComment,
                 deletedRemoteIds = deletedProducts.mapNotNull { it.idInDocument }
             )
+            if (snapshotOutcome is SaveOutcome.Failed) {
+                TsdLogger.error(
+                    category = "CONDUCT",
+                    event = "pre_conduct_snapshot_failed",
+                    operationId = operationId,
+                    documentId = idDocument,
+                    throwable = snapshotOutcome.cause
+                )
+                return ConductResult(
+                    isSuccess = false,
+                    message = "Не удалось сохранить черновик перед проведением: ${snapshotOutcome.errorMessage}. Проведение в Битрикс заблокировано, локальные данные не уничтожены.",
+                    state = ComingOperationState.FAILED,
+                    operationId = operationId
+                )
+            }
 
             // If previous attempt was interrupted mid-flight, reconcile first
             if (draft.state == ComingOperationState.RECONCILIATION_REQUIRED) {
@@ -390,18 +434,12 @@ class CatalogDocumentComingService(
                 operationId = operationId
             )) {
                 is ConductResult.SaveResult.Failure -> {
-                    draftRepository.transitionState(
+                    return persistFailedConduct(
                         documentId = idDocument,
-                        newState = ComingOperationState.FAILED,
-                        syncState = ComingSyncState.SYNC_ERROR,
-                        errorMessage = saveResult.errorMessage
-                    )
-                    return ConductResult(
-                        isSuccess = false,
-                        message = saveResult.errorMessage,
-                        state = ComingOperationState.FAILED,
                         operationId = operationId,
-                        failedPositionIndex = saveResult.failedPositionIndex
+                        message = saveResult.errorMessage,
+                        failedPositionIndex = saveResult.failedPositionIndex,
+                        requiresReconciliation = saveResult.requiresReconciliation
                     )
                 }
                 is ConductResult.SaveResult.Success -> {
@@ -416,10 +454,14 @@ class CatalogDocumentComingService(
 
                     if (deleteIds.isNotEmpty()) {
                         val deletedOk = deleteDocumentElementsByIdSuspend(deleteIds, idDocument, operationId)
-                        if (!deletedOk) {
-                            val err = "Ошибка при удалении отменённых строк документа в Битрикс."
-                            draftRepository.transitionState(idDocument, ComingOperationState.FAILED, ComingSyncState.SYNC_ERROR, err)
-                            return ConductResult(false, err, ComingOperationState.FAILED, operationId)
+                        if (!deletedOk.success) {
+                            return persistFailedConduct(
+                                documentId = idDocument,
+                                operationId = operationId,
+                                message = deletedOk.errorMessage
+                                    ?: "Ошибка при удалении отменённых строк документа в Битрикс.",
+                                requiresReconciliation = true
+                            )
                         }
                     }
 
@@ -429,10 +471,14 @@ class CatalogDocumentComingService(
                         operationId = operationId,
                         defaultStoreTo = destinationStoreId
                     )
-                    if (!syncElementsResult.first) {
-                        val err = syncElementsResult.second ?: "Ошибка при синхронизации строк документа в Битрикс."
-                        draftRepository.transitionState(idDocument, ComingOperationState.FAILED, ComingSyncState.SYNC_ERROR, err)
-                        return ConductResult(false, err, ComingOperationState.FAILED, operationId)
+                    if (!syncElementsResult.success) {
+                        return persistFailedConduct(
+                            documentId = idDocument,
+                            operationId = operationId,
+                            message = syncElementsResult.errorMessage
+                                ?: "Ошибка при синхронизации строк документа в Битрикс.",
+                            requiresReconciliation = true
+                        )
                     }
 
                     // Update dimensions ONLY for offers verified to belong to this document's items
@@ -459,21 +505,47 @@ class CatalogDocumentComingService(
                 documentId = idDocument,
                 throwable = e
             )
+            val currentState = draftRepository.getDraft(idDocument)?.state
+            val mutationsMayHaveOccurred = currentState == ComingOperationState.PROCESSING ||
+                currentState == ComingOperationState.RECONCILIATION_REQUIRED ||
+                currentState == ComingOperationState.READY
             val errMsg = "Непредвиденная ошибка при проведении: ${e.localizedMessage ?: e::class.java.simpleName}"
-            draftRepository.transitionState(
+            return persistFailedConduct(
                 documentId = idDocument,
-                newState = ComingOperationState.FAILED,
-                syncState = ComingSyncState.SYNC_ERROR,
-                errorMessage = errMsg
-            )
-            return ConductResult(
-                isSuccess = false,
+                operationId = draftRepository.getDraft(idDocument)?.operationId ?: "",
                 message = errMsg,
-                state = ComingOperationState.FAILED
+                requiresReconciliation = mutationsMayHaveOccurred || e is IOException
             )
         } finally {
             mutex.unlock()
         }
+    }
+
+    private suspend fun persistFailedConduct(
+        documentId: Int,
+        operationId: String,
+        message: String,
+        failedPositionIndex: Int? = null,
+        requiresReconciliation: Boolean
+    ): ConductResult {
+        val state = if (requiresReconciliation) {
+            ComingOperationState.RECONCILIATION_REQUIRED
+        } else {
+            ComingOperationState.FAILED
+        }
+        draftRepository.transitionState(
+            documentId = documentId,
+            newState = state,
+            syncState = ComingSyncState.SYNC_ERROR,
+            errorMessage = message
+        )
+        return ConductResult(
+            isSuccess = false,
+            message = message,
+            state = state,
+            operationId = operationId,
+            failedPositionIndex = failedPositionIndex
+        )
     }
 
     private suspend fun applyItemErrors(
@@ -541,7 +613,19 @@ class CatalogDocumentComingService(
                 return@withContext ConductResult(false, msg, ComingOperationState.FAILED, operationId)
             }
             is DocumentServerStatus.Unverified -> {
-                // Unstubbed in isolated test mocks -> continue
+                val msg = "Не удалось достоверно подтвердить статус документа №$documentId в Битрикс. Изменяющие операции заблокированы до сверки."
+                draftRepository.transitionState(
+                    documentId = documentId,
+                    newState = ComingOperationState.RECONCILIATION_REQUIRED,
+                    syncState = ComingSyncState.SYNC_ERROR,
+                    errorMessage = msg
+                )
+                return@withContext ConductResult(
+                    isSuccess = false,
+                    message = msg,
+                    state = ComingOperationState.RECONCILIATION_REQUIRED,
+                    operationId = operationId
+                )
             }
         }
 
@@ -741,7 +825,7 @@ class CatalogDocumentComingService(
     ): OfferOwnershipCheck {
         return try {
             val response = apiBitrix.getProductById(ProductIdRequest(id = offerId.toString()))
-                ?: return OfferOwnershipCheck.Compatible // Unstubbed Mockito mock in unit test
+                ?: return OfferOwnershipCheck.VerificationError("не получен ответ API при проверке вариации ID $offerId")
             if (!response.isSuccessful) {
                 return OfferOwnershipCheck.VerificationError("HTTP ${response.code()}")
             }
@@ -799,8 +883,12 @@ class CatalogDocumentComingService(
             )
             val response = apiBitrix.getDocumentProducts(request)
             if (response == null) {
-                // Unstubbed mock in isolated unit tests
-                return emptyList()
+                TsdLogger.warn(
+                    category = "RECONCILE",
+                    event = "element_list_unverified",
+                    documentId = documentId
+                )
+                return null
             }
             if (!response.isSuccessful) {
                 TsdLogger.warn(
@@ -892,7 +980,7 @@ class CatalogDocumentComingService(
         elementIds: List<Int>,
         idDocument: Int,
         operationId: String
-    ): Boolean = withContext(Dispatchers.IO) {
+    ): MutationStepResult = withContext(Dispatchers.IO) {
         for (elementId in elementIds) {
             try {
                 val request = DeletedDocumentElementRequest(
@@ -908,7 +996,11 @@ class CatalogDocumentComingService(
                         documentId = idDocument,
                         fields = mapOf("docElementId" to elementId, "code" to response.code())
                     )
-                    return@withContext false
+                    return@withContext MutationStepResult(
+                        success = false,
+                        errorMessage = "Ошибка при удалении строки документа ID $elementId в Битрикс (HTTP ${response.code()}).",
+                        outcomeUnknown = response.code() in 500..599
+                    )
                 }
                 draftRepository.appendJournal(
                     operationId = operationId,
@@ -926,10 +1018,14 @@ class CatalogDocumentComingService(
                     fields = mapOf("docElementId" to elementId),
                     throwable = e
                 )
-                return@withContext false
+                return@withContext MutationStepResult(
+                    success = false,
+                    errorMessage = "Обрыв связи при удалении строки документа ID $elementId. Результат на сервере неизвестен.",
+                    outcomeUnknown = true
+                )
             }
         }
-        true
+        MutationStepResult(success = true)
     }
 
     /**
@@ -944,11 +1040,15 @@ class CatalogDocumentComingService(
         idDocument: Int,
         operationId: String,
         defaultStoreTo: Int
-    ): Pair<Boolean, String?> = withContext(Dispatchers.IO) {
-        if (savedVariations.isEmpty()) return@withContext true to null
+    ): MutationStepResult = withContext(Dispatchers.IO) {
+        if (savedVariations.isEmpty()) return@withContext MutationStepResult(success = true)
 
         val serverElements = fetchServerDocumentElements(idDocument)
-            ?: return@withContext false to "Не удалось проверить существующие строки документа в Битрикс перед добавлением."
+            ?: return@withContext MutationStepResult(
+                success = false,
+                errorMessage = "Не удалось проверить существующие строки документа в Битрикс перед добавлением.",
+                outcomeUnknown = true
+            )
 
         matchLocalItemsWithServerElements(
             documentId = idDocument,
@@ -987,7 +1087,11 @@ class CatalogDocumentComingService(
                         val bodyErr = BitrixApiErrorParser.fromSuccessBody(updResp.body())
                         if (!updResp.isSuccessful || bodyErr != null) {
                             val msg = "Позиция №${index + 1} (${currentProduct.name}): не удалось обновить строку документа ID $existingDocElementId."
-                            return@withContext false to msg
+                            return@withContext MutationStepResult(
+                                success = false,
+                                errorMessage = msg,
+                                outcomeUnknown = updResp.code() in 500..599
+                            )
                         }
                         draftRepository.recordItemStepProgress(
                             documentId = idDocument,
@@ -1003,7 +1107,11 @@ class CatalogDocumentComingService(
                             details = "amount=$desiredQty storeTo=$targetStore"
                         )
                     } catch (e: Exception) {
-                        return@withContext false to "Позиция №${index + 1} (${currentProduct.name}): сетевая ошибка обновления строки документа."
+                        return@withContext MutationStepResult(
+                            success = false,
+                            errorMessage = "Позиция №${index + 1} (${currentProduct.name}): сетевая ошибка обновления строки документа. Результат на сервере неизвестен.",
+                            outcomeUnknown = true
+                        )
                     }
                 } else {
                     draftRepository.appendJournal(
@@ -1064,7 +1172,11 @@ class CatalogDocumentComingService(
                         documentId = idDocument,
                         fields = mapOf("offerId" to offerElementId, "code" to response.code())
                     )
-                    return@withContext false to msg
+                    return@withContext MutationStepResult(
+                        success = false,
+                        errorMessage = msg,
+                        outcomeUnknown = response.code() in 500..599
+                    )
                 }
             } catch (e: Exception) {
                 TsdLogger.error(
@@ -1075,11 +1187,15 @@ class CatalogDocumentComingService(
                     fields = mapOf("offerId" to offerElementId),
                     throwable = e
                 )
-                return@withContext false to "Позиция №${index + 1} (${currentProduct.name}): обрыв связи при добавлении строки в документ."
+                return@withContext MutationStepResult(
+                    success = false,
+                    errorMessage = "Позиция №${index + 1} (${currentProduct.name}): обрыв связи при добавлении строки в документ. Результат на сервере неизвестен.",
+                    outcomeUnknown = true
+                )
             }
         }
 
-        true to null
+        MutationStepResult(success = true)
     }
 
     private suspend fun executeConductAndVerify(
@@ -1128,11 +1244,17 @@ class CatalogDocumentComingService(
                         }
                     }
                     is DocumentServerStatus.Unverified -> {
-                        // Only happens in simplified unit-test mocks where getDocumentListSuspend wasn't stubbed
-                        draftRepository.markCommittedAndFinalize(idDocument, operationId)
+                        val msg = "Запрос проведения отправлен, но статус документа в Битрикс не подтверждён. Требуется сверка перед повтором."
+                        draftRepository.transitionState(
+                            documentId = idDocument,
+                            newState = ComingOperationState.RECONCILIATION_REQUIRED,
+                            syncState = ComingSyncState.SYNC_ERROR,
+                            errorMessage = msg
+                        )
                         return@withContext ConductResult(
-                            isSuccess = true,
-                            state = ComingOperationState.COMMITTED,
+                            isSuccess = false,
+                            message = msg,
+                            state = ComingOperationState.RECONCILIATION_REQUIRED,
                             operationId = operationId
                         )
                     }
@@ -1192,16 +1314,28 @@ class CatalogDocumentComingService(
                     documentId = idDocument,
                     fields = mapOf("code" to response.code(), "desc" to errorDescription)
                 )
+                val knownNotConducted = postStatus is DocumentServerStatus.Found &&
+                    postStatus.document.status?.uppercase() != "Y"
+                val reconState = if (knownNotConducted) {
+                    ComingOperationState.FAILED
+                } else {
+                    ComingOperationState.RECONCILIATION_REQUIRED
+                }
+                val finalMessage = if (knownNotConducted) {
+                    errorDescription
+                } else {
+                    "Ответ проведения не подтверждён ($errorDescription). Статус документа в Битрикс неизвестен — требуется сверка."
+                }
                 draftRepository.transitionState(
                     documentId = idDocument,
-                    newState = ComingOperationState.FAILED,
+                    newState = reconState,
                     syncState = ComingSyncState.SYNC_ERROR,
-                    errorMessage = errorDescription
+                    errorMessage = finalMessage
                 )
                 return@withContext ConductResult(
                     isSuccess = false,
-                    message = errorDescription,
-                    state = ComingOperationState.FAILED,
+                    message = finalMessage,
+                    state = reconState,
                     operationId = operationId
                 )
             }
@@ -1286,6 +1420,7 @@ class CatalogDocumentComingService(
         }
 
         val successfullySaved = mutableListOf<Pair<Int, ProductOffer>>()
+        var remoteMutationOccurredOrUncertain = false
 
         for ((index, productOffer) in productOffersList.withIndex()) {
             val posNum = index + 1
@@ -1298,7 +1433,8 @@ class CatalogDocumentComingService(
                         is BarcodeLookupOutcome.Error -> {
                             return@withContext ConductResult.SaveResult.Failure(
                                 errorMessage = "Позиция №$posNum (${productOffer.name}): ошибка проверки штрихкода '$normalizedBarcode' (${lookup.message}).",
-                                failedPositionIndex = index
+                                failedPositionIndex = index,
+                                requiresReconciliation = remoteMutationOccurredOrUncertain
                             )
                         }
                         is BarcodeLookupOutcome.Found -> {
@@ -1329,13 +1465,15 @@ class CatalogDocumentComingService(
                                     return@withContext ConductResult.SaveResult.Failure(
                                         errorMessage = conflictMsg,
                                         failedPositionIndex = index,
-                                        isConflict = true
+                                        isConflict = true,
+                                        requiresReconciliation = remoteMutationOccurredOrUncertain
                                     )
                                 }
                                 is OfferOwnershipCheck.VerificationError -> {
                                     return@withContext ConductResult.SaveResult.Failure(
                                         errorMessage = "Позиция №$posNum (${productOffer.name}): не удалось проверить вариацию ID ${lookup.productId} (${ownership.reason}).",
-                                        failedPositionIndex = index
+                                        failedPositionIndex = index,
+                                        requiresReconciliation = remoteMutationOccurredOrUncertain
                                     )
                                 }
                             }
@@ -1357,37 +1495,56 @@ class CatalogDocumentComingService(
 
                 // Step 3: Create new variation only if none exists yet
                 if (offerIdToUse == null) {
-                    val createdId = addVariationOfProductSuspend(productOffer)
-                        ?: return@withContext ConductResult.SaveResult.Failure(
-                            errorMessage = "Позиция №$posNum: не удалось создать вариацию товара «${productOffer.name}».",
-                            failedPositionIndex = index
-                        )
-                    offerIdToUse = createdId
-                    productOffer.id = createdId
-                    CatalogReferenceCache.invalidateProduct(productOffer.parentId)
+                    when (val created = addVariationOfProductSuspend(productOffer)) {
+                        is VariationCreateOutcome.Uncertain -> {
+                            remoteMutationOccurredOrUncertain = true
+                            return@withContext ConductResult.SaveResult.Failure(
+                                errorMessage = "Позиция №$posNum: ${created.message} Результат создания вариации неизвестен — требуется сверка.",
+                                failedPositionIndex = index,
+                                requiresReconciliation = true
+                            )
+                        }
+                        is VariationCreateOutcome.Rejected -> {
+                            return@withContext ConductResult.SaveResult.Failure(
+                                errorMessage = "Позиция №$posNum: не удалось создать вариацию товара «${productOffer.name}» (${created.message}).",
+                                failedPositionIndex = index,
+                                requiresReconciliation = remoteMutationOccurredOrUncertain
+                            )
+                        }
+                        is VariationCreateOutcome.Created -> {
+                            offerIdToUse = created.offerId
+                            productOffer.id = created.offerId
+                            CatalogReferenceCache.invalidateProduct(productOffer.parentId)
+                            remoteMutationOccurredOrUncertain = true
 
-                    // Persist created offerId IMMEDIATELY before barcode assignment so crash/failure won't orphan it
-                    if (documentId != null && operationId != null) {
-                        draftRepository.recordItemStepProgress(
-                            documentId = documentId,
-                            operationId = operationId,
-                            localItemId = productOffer.localItemId,
-                            offerId = createdId,
-                            idInDocument = productOffer.idInDocument,
-                            itemStatus = ComingItemStatus.VARIATION_RESOLVED,
-                            syncState = ComingSyncState.REMOTE_VARIATION_CREATED,
-                            stepType = "CREATE_VARIATION",
-                            stepStatus = "SUCCEEDED",
-                            remoteEntityId = createdId,
-                            details = "Created offerId=$createdId for parentId=${productOffer.parentId}"
-                        )
+                            // Persist created offerId IMMEDIATELY before barcode assignment so crash/failure won't orphan it
+                            if (documentId != null && operationId != null) {
+                                draftRepository.recordItemStepProgress(
+                                    documentId = documentId,
+                                    operationId = operationId,
+                                    localItemId = productOffer.localItemId,
+                                    offerId = created.offerId,
+                                    idInDocument = productOffer.idInDocument,
+                                    itemStatus = ComingItemStatus.VARIATION_RESOLVED,
+                                    syncState = ComingSyncState.REMOTE_VARIATION_CREATED,
+                                    stepType = "CREATE_VARIATION",
+                                    stepStatus = "SUCCEEDED",
+                                    remoteEntityId = created.offerId,
+                                    details = "Created offerId=${created.offerId} for parentId=${productOffer.parentId}"
+                                )
+                            }
+                        }
                     }
                 }
 
                 // Step 4: Bind barcode to the variation
                 if (!normalizedBarcode.isNullOrBlank()) {
-                    val barcodeSuccess = setBarcodeForProductSuspend(offerIdToUse, normalizedBarcode)
-                    if (!barcodeSuccess) {
+                    val barcodeOutcome = setBarcodeForProductSuspend(offerIdToUse!!, normalizedBarcode)
+                    val barcodeBound = barcodeOutcome is BarcodeBindOutcome.Bound
+                    if (barcodeOutcome is BarcodeBindOutcome.Uncertain) {
+                        remoteMutationOccurredOrUncertain = true
+                    }
+                    if (!barcodeBound) {
                         // Re-query barcode in case of concurrent creation or retry idempotency
                         val recheck = lookupBarcodeAuthoritative(normalizedBarcode)
                         if (recheck is BarcodeLookupOutcome.Found && recheck.productId == offerIdToUse) {
@@ -1403,19 +1560,28 @@ class CatalogDocumentComingService(
                                 return@withContext ConductResult.SaveResult.Failure(
                                     errorMessage = errorMessage,
                                     failedPositionIndex = index,
-                                    isConflict = true
+                                    isConflict = true,
+                                    requiresReconciliation = remoteMutationOccurredOrUncertain
                                 )
                             }
+                        } else if (barcodeOutcome is BarcodeBindOutcome.Uncertain || recheck is BarcodeLookupOutcome.Error) {
+                            return@withContext ConductResult.SaveResult.Failure(
+                                errorMessage = "Позиция №$posNum: связь оборвалась при назначении штрихкода '$normalizedBarcode' товару «${productOffer.name}». Результат на сервере неизвестен — требуется сверка.",
+                                failedPositionIndex = index,
+                                requiresReconciliation = true
+                            )
                         } else {
                             val errorMessage = "Позиция №$posNum: штрихкод '$normalizedBarcode' для товара '${productOffer.name}' уже используется или не может быть назначен."
                             return@withContext ConductResult.SaveResult.Failure(
                                 errorMessage = errorMessage,
                                 failedPositionIndex = index,
-                                isConflict = true
+                                isConflict = true,
+                                requiresReconciliation = remoteMutationOccurredOrUncertain
                             )
                         }
                     }
                     CatalogReferenceCache.putBarcodeMapping(normalizedBarcode, offerIdToUse)
+                    remoteMutationOccurredOrUncertain = true
 
                     if (documentId != null && operationId != null) {
                         draftRepository.recordItemStepProgress(
@@ -1446,7 +1612,8 @@ class CatalogDocumentComingService(
                 )
                 return@withContext ConductResult.SaveResult.Failure(
                     errorMessage = "Позиция №$posNum: критическая ошибка при сохранении товара «${productOffer.name}».",
-                    failedPositionIndex = index
+                    failedPositionIndex = index,
+                    requiresReconciliation = remoteMutationOccurredOrUncertain || e is IOException
                 )
             }
         }
@@ -1488,21 +1655,33 @@ class CatalogDocumentComingService(
         }
     }
 
-    private suspend fun setBarcodeForProductSuspend(productId: Int, barcode: String): Boolean {
+    private suspend fun setBarcodeForProductSuspend(productId: Int, barcode: String): BarcodeBindOutcome {
         val barcodeRequest = BarcodeRequest(productId, barcode)
         return withContext(Dispatchers.IO) {
             try {
                 val response = apiBarcode.setBarcodeByProductId(barcodeRequest)
                 if (response.isSuccessful) {
-                    response.body()?.result == true
+                    if (response.body()?.result == true) BarcodeBindOutcome.Bound else BarcodeBindOutcome.Rejected
                 } else {
                     TsdLogger.warn(
                         category = "BARCODE",
                         event = "set_barcode_http_error",
                         fields = mapOf("offerId" to productId, "code" to response.code())
                     )
-                    false
+                    if (response.code() in 500..599) {
+                        BarcodeBindOutcome.Uncertain("HTTP ${response.code()}")
+                    } else {
+                        BarcodeBindOutcome.Rejected
+                    }
                 }
+            } catch (e: IOException) {
+                TsdLogger.error(
+                    category = "BARCODE",
+                    event = "set_barcode_network_error",
+                    fields = mapOf("offerId" to productId),
+                    throwable = e
+                )
+                BarcodeBindOutcome.Uncertain("ошибка сети")
             } catch (e: Exception) {
                 TsdLogger.error(
                     category = "BARCODE",
@@ -1510,12 +1689,12 @@ class CatalogDocumentComingService(
                     fields = mapOf("offerId" to productId),
                     throwable = e
                 )
-                false
+                BarcodeBindOutcome.Uncertain(e.message ?: "ошибка ответа API")
             }
         }
     }
 
-    private suspend fun addVariationOfProductSuspend(productOffer: ProductOffer): Int? {
+    private suspend fun addVariationOfProductSuspend(productOffer: ProductOffer): VariationCreateOutcome {
         val fieldsMap: MutableMap<String, Any?> = mutableMapOf(
             "iblockId" to BitrixConfig.iblockOffers,
             "name" to productOffer.name,
@@ -1538,15 +1717,32 @@ class CatalogDocumentComingService(
                 val response = apiBitrix.addVariationsOfProduct(productOfferRequest)
                 if (response.isSuccessful) {
                     val offerObj = response.body()?.result?.get("offer") as? Map<*, *>
-                    BitrixNumberParser.toIntOrNull(offerObj?.get("id"))
+                    val parsedId = BitrixNumberParser.toIntOrNull(offerObj?.get("id"))
+                    if (parsedId != null && parsedId > 0) {
+                        VariationCreateOutcome.Created(parsedId)
+                    } else {
+                        VariationCreateOutcome.Uncertain("сервер вернул успешный ответ без идентификатора вариации")
+                    }
                 } else {
                     TsdLogger.error(
                         category = "VARIATION",
                         event = "add_offer_http_error",
                         fields = mapOf("parentId" to productOffer.parentId, "code" to response.code())
                     )
-                    null
+                    if (response.code() in 500..599) {
+                        VariationCreateOutcome.Uncertain("HTTP ${response.code()} при создании вариации")
+                    } else {
+                        VariationCreateOutcome.Rejected("HTTP ${response.code()}")
+                    }
                 }
+            } catch (e: IOException) {
+                TsdLogger.error(
+                    category = "VARIATION",
+                    event = "add_offer_network_error",
+                    fields = mapOf("parentId" to productOffer.parentId),
+                    throwable = e
+                )
+                VariationCreateOutcome.Uncertain("сеть оборвалась при создании вариации")
             } catch (e: Exception) {
                 TsdLogger.error(
                     category = "VARIATION",
@@ -1554,7 +1750,7 @@ class CatalogDocumentComingService(
                     fields = mapOf("parentId" to productOffer.parentId),
                     throwable = e
                 )
-                null
+                VariationCreateOutcome.Uncertain(e.message ?: "ошибка создания вариации")
             }
         }
     }

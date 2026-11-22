@@ -274,6 +274,41 @@ class FileBackedDraftStorageEngine(
         persistLocked()
     }
 
+    override fun recordItemAndJournalAtomically(
+        documentId: Int,
+        localItemId: String,
+        offerId: Int?,
+        idInDocument: Int?,
+        itemStatus: ComingItemStatus,
+        syncState: ComingSyncState,
+        validationError: String?,
+        journalEntry: OperationStepJournalEntry
+    ) = synchronized(lock) {
+        val existing = comingDrafts[documentId] ?: return
+        val now = System.currentTimeMillis()
+        val newItems = existing.items.map { item ->
+            if (item.localItemId == localItemId) {
+                item.detachedCopy(preserveLocalItemId = true).apply {
+                    if (offerId != null) this.offerId = offerId
+                    if (idInDocument != null) this.idInDocument = idInDocument
+                    this.itemStatus = itemStatus
+                    this.syncState = syncState
+                    this.validationError = validationError
+                    this.updatedAtMs = now
+                }
+            } else {
+                item.detachedCopy(preserveLocalItemId = true)
+            }
+        }
+        comingDrafts[documentId] = existing.copy(
+            items = newItems,
+            updatedAtMs = now,
+            lastActiveAtMs = now
+        )
+        journal.add(journalEntry.copy(stepId = nextJournalStepId++))
+        persistLocked()
+    }
+
     override fun removeComingItem(
         documentId: Int,
         localItemId: String,

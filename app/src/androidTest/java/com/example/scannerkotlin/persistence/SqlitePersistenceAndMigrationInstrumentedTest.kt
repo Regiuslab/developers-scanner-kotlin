@@ -9,7 +9,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.scannerkotlin.activities.ProductsDocumentComingActivity
 import com.example.scannerkotlin.cache.CatalogReferenceCache
+import com.example.scannerkotlin.model.ComingItemStatus
 import com.example.scannerkotlin.model.ComingOperationState
+import com.example.scannerkotlin.model.ComingSyncState
 import com.example.scannerkotlin.model.Product
 import com.example.scannerkotlin.model.SaveOutcome
 import com.example.scannerkotlin.utils.SessionManager
@@ -92,6 +94,53 @@ class SqlitePersistenceAndMigrationInstrumentedTest {
         assertEquals("4600001110000", migratedDraft.items[0].barcode)
         assertEquals("4600001110002", migratedDraft.items[2].barcode)
         upgradedEngine.close()
+        context.deleteDatabase(dbName)
+    }
+
+    @Test
+    fun sqliteRecordItemAndJournalAtomicallyPersistsOfferIdWithMatchingJournalRow() = runBlocking {
+        val dbName = "test_atomic_item_journal.db"
+        context.deleteDatabase(dbName)
+        val engine = SqliteDraftStorageEngine(context, dbName)
+        val repo = ComingDraftRepository(engine)
+        val item = Product(
+            idInDocument = null,
+            id = 51,
+            iblockId = 14,
+            name = "Труба atomic",
+            measureId = 1,
+            measureSymbol = "м",
+            quantity = 1.0,
+            barcode = "4600000000777",
+            diameter = 76.0,
+            weight = 12.0,
+            height = 4.0,
+            parentId = null,
+            storeAmount = null
+        )
+        repo.saveSnapshot(778, "Приход atomic", 1, null, listOf(item), null)
+        val draft = repo.getDraft(778)!!
+        repo.recordItemStepProgress(
+            documentId = 778,
+            operationId = draft.operationId,
+            localItemId = draft.items[0].localItemId,
+            offerId = 5551,
+            idInDocument = 8801,
+            itemStatus = ComingItemStatus.ELEMENT_ADDED,
+            syncState = ComingSyncState.REMOTE_ELEMENT_CREATED,
+            stepType = "ADD_ELEMENT",
+            stepStatus = "SUCCEEDED",
+            remoteEntityId = 8801
+        )
+        val reopened = SqliteDraftStorageEngine(context, dbName)
+        val loaded = reopened.loadComingDraft(778)
+        assertNotNull(loaded)
+        assertEquals(5551, loaded!!.items[0].offerId)
+        assertEquals(8801, loaded.items[0].idInDocument)
+        val journal = reopened.getStepJournal(loaded.operationId)
+        assertTrue(journal.any { it.stepType == "ADD_ELEMENT" && it.remoteEntityId == 8801 })
+        engine.close()
+        reopened.close()
         context.deleteDatabase(dbName)
     }
 

@@ -6,6 +6,7 @@ import com.example.scannerkotlin.model.ComingOperationState
 import com.example.scannerkotlin.model.Product
 import com.example.scannerkotlin.model.ProductOffer
 import com.example.scannerkotlin.persistence.ComingDraftRepository
+import com.example.scannerkotlin.persistence.DraftStorageEngine
 import com.example.scannerkotlin.persistence.FileBackedDraftStorageEngine
 import com.example.scannerkotlin.request.AddDocumentElementRequest
 import com.example.scannerkotlin.request.BarcodeRequest
@@ -436,6 +437,271 @@ class CatalogDocumentComingServiceTest {
         assertEquals(0, fakeServer.conductCalls.get())
     }
 
+    @Test
+    fun `RV-01 saveSnapshot SQLite failure blocks Bitrix mutations and preserves draft`() = runBlocking {
+        val docId = 601
+        val failingEngine = FailingSnapshotEngine(engine)
+        val failingRepo = ComingDraftRepository(failingEngine)
+        ComingDraftRepository.installEngineForTest(failingEngine)
+
+        fakeServer.seedDraftDocument(docId)
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        val item = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000601", qty = 2.0)
+        val saved = failingRepo.saveSnapshot(
+            documentId = docId,
+            documentTitle = "Приход RV-01",
+            destinationStoreId = 1,
+            allowedNomenclatureIds = null,
+            products = listOf(item),
+            comment = "не терять"
+        )
+        assertTrue(saved is com.example.scannerkotlin.model.SaveOutcome.Saved)
+        assertEquals(1, failingRepo.getDraft(docId)!!.items.size)
+
+        failingEngine.failNextSaveFull = true
+        val service = CatalogDocumentComingService(fakeServer, fakeServer, failingRepo)
+        val result = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = "не терять",
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+
+        assertFalse(result.isSuccess)
+        assertTrue(
+            "Actual message: ${result.message}",
+            result.message.orEmpty().contains("сохранить черновик") &&
+                result.message.orEmpty().contains("заблокировано")
+        )
+        assertEquals(0, fakeServer.offerAddCalls.get())
+        assertEquals(0, fakeServer.barcodeSetCalls.get())
+        assertEquals(0, fakeServer.elementAddCalls.get())
+        assertEquals(0, fakeServer.conductCalls.get())
+
+        failingEngine.failNextSaveFull = false
+        val preserved = failingRepo.getDraft(docId)
+        assertNotNull(preserved)
+        assertEquals(1, preserved!!.items.size)
+        assertEquals("4600000000601", preserved.items[0].barcode)
+        assertEquals("не терять", preserved.comment)
+        assertEquals(ComingOperationState.DRAFT, preserved.state)
+    }
+
+    @Test
+    fun `RV-02 unverified document status blocks all mutating Bitrix calls`() = runBlocking {
+        val docId = 602
+        fakeServer.seedDraftDocument(docId)
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.omitDocumentsKeyInList = true
+
+        val item = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000602", qty = 1.0)
+        val service = CatalogDocumentComingService(fakeServer, fakeServer, repository)
+        val result = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+
+        assertFalse(result.isSuccess)
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, result.state)
+        assertTrue(result.message.orEmpty().contains("достоверно подтвердить статус"))
+        assertEquals(0, fakeServer.offerAddCalls.get())
+        assertEquals(0, fakeServer.barcodeSetCalls.get())
+        assertEquals(0, fakeServer.elementAddCalls.get())
+        assertEquals(0, fakeServer.conductCalls.get())
+    }
+
+    @Test
+    fun `RV-03 error after offer add requires reconciliation and retry reuses variation`() = runBlocking {
+        val docId = 603
+        fakeServer.seedDraftDocument(docId)
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.throwOnNextBarcodeSet = java.net.SocketTimeoutException("after offer.add")
+
+        val item = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000603", qty = 3.0)
+        val service = CatalogDocumentComingService(fakeServer, fakeServer, repository)
+        val first = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+
+        assertFalse(first.isSuccess)
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, first.state)
+        assertEquals(1, fakeServer.offerAddCalls.get())
+        assertEquals(0, fakeServer.elementAddCalls.get())
+        assertEquals(0, fakeServer.conductCalls.get())
+        val persistedOfferId = repository.getDraft(docId)!!.items[0].offerId
+        assertNotNull(persistedOfferId)
+
+        engine.updateDraftMetadata(docId, state = ComingOperationState.PROCESSING)
+        val restartedEngine = FileBackedDraftStorageEngine(tempFolder.root.resolve("draft_db"))
+        val restartedRepo = ComingDraftRepository(restartedEngine)
+        val recovered = restartedRepo.runStartupRecovery().first { it.documentId == docId }
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, recovered.state)
+        assertEquals(persistedOfferId, recovered.items[0].offerId)
+
+        val restartedService = CatalogDocumentComingService(fakeServer, fakeServer, restartedRepo)
+        val retry = restartedService.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = recovered.items,
+            currentProductListState = recovered.items,
+            productOffersList = recovered.items.map { ProductOffer(it) }
+        )
+
+        assertTrue("Retry should succeed: ${retry.message}", retry.isSuccess)
+        assertEquals("Must not create a second variation", 1, fakeServer.offerAddCalls.get())
+        assertEquals(1, fakeServer.elementAddCalls.get())
+        assertEquals(1, fakeServer.conductCalls.get())
+    }
+
+    @Test
+    fun `RV-04 error after barcode set requires reconciliation without duplicate barcode bind`() = runBlocking {
+        val docId = 604
+        fakeServer.seedDraftDocument(docId)
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.throwAfterBindingBarcode = true
+        fakeServer.failBarcodeLookupIfAlreadyBound = true
+
+        val item = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000604", qty = 1.0)
+        val service = CatalogDocumentComingService(fakeServer, fakeServer, repository)
+        val first = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+
+        assertFalse(first.isSuccess)
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, first.state)
+        assertEquals(1, fakeServer.offerAddCalls.get())
+        assertEquals(1, fakeServer.barcodeSetCalls.get())
+        assertEquals(0, fakeServer.elementAddCalls.get())
+
+        val retry = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+        assertTrue("Retry should reuse bound barcode: ${retry.message}", retry.isSuccess)
+        assertEquals(1, fakeServer.offerAddCalls.get())
+        assertEquals(1, fakeServer.barcodeSetCalls.get())
+        assertEquals(1, fakeServer.elementAddCalls.get())
+        assertEquals(1, fakeServer.conductCalls.get())
+    }
+
+    @Test
+    fun `RV-05 error after element add requires reconciliation and does not duplicate stock`() = runBlocking {
+        val docId = 605
+        fakeServer.seedDraftDocument(docId)
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.throwAfterAddingElement = true
+
+        val item = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000605", qty = 8.0)
+        val service = CatalogDocumentComingService(fakeServer, fakeServer, repository)
+        val first = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+
+        assertFalse(first.isSuccess)
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, first.state)
+        assertEquals(1, fakeServer.elementAddCalls.get())
+        assertEquals(1, fakeServer.documentElements[docId]?.size)
+        assertEquals(0, fakeServer.conductCalls.get())
+
+        val retry = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+        assertTrue("Retry must match existing server element: ${retry.message}", retry.isSuccess)
+        assertEquals(1, fakeServer.elementAddCalls.get())
+        assertEquals(1, fakeServer.documentElements[docId]?.size)
+        assertEquals(1, fakeServer.conductCalls.get())
+    }
+
+    @Test
+    fun `RV-06 unverified status after conduct does not mark committed and retry reconciles`() = runBlocking {
+        val docId = 606
+        fakeServer.seedDraftDocument(docId)
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.omitDocumentsKeyInListAfterConduct = true
+
+        val item = comingProduct(id = 51, name = "Труба 63", barcode = "4600000000606", qty = 1.0)
+        val service = CatalogDocumentComingService(fakeServer, fakeServer, repository)
+        val first = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+
+        assertFalse(first.isSuccess)
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, first.state)
+        assertEquals("Y", fakeServer.documentStatuses[docId])
+        assertEquals(1, fakeServer.conductCalls.get())
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, repository.getDraft(docId)?.state)
+
+        fakeServer.omitDocumentsKeyInList = false
+        val retry = service.conductDocumentSuspend(
+            baseList = emptyList(),
+            idDocument = docId,
+            context = null,
+            documentComment = null,
+            deletedProducts = emptyList(),
+            updatedProducts = listOf(item),
+            currentProductListState = listOf(item),
+            productOffersList = listOf(ProductOffer(item))
+        )
+        assertTrue(retry.isSuccess)
+        assertTrue(retry.reconciledAlreadyConducted)
+        assertEquals(1, fakeServer.conductCalls.get())
+        assertEquals(ComingOperationState.COMMITTED, retry.state)
+    }
+
     private fun comingProduct(
         id: Int,
         name: String,
@@ -487,6 +753,24 @@ class CatalogDocumentComingServiceTest {
         @Volatile
         var failNextConductResponse: Boolean = false
 
+        @Volatile
+        var omitDocumentsKeyInList: Boolean = false
+
+        @Volatile
+        var omitDocumentsKeyInListAfterConduct: Boolean = false
+
+        @Volatile
+        var throwOnNextBarcodeSet: Throwable? = null
+
+        @Volatile
+        var throwAfterBindingBarcode: Boolean = false
+
+        @Volatile
+        var throwAfterAddingElement: Boolean = false
+
+        @Volatile
+        var failBarcodeLookupIfAlreadyBound: Boolean = false
+
         fun seedDraftDocument(docId: Int, status: String = "N") {
             documentStatuses[docId] = status
             documentElements.putIfAbsent(docId, mutableListOf())
@@ -515,6 +799,9 @@ class CatalogDocumentComingServiceTest {
         }
 
         override suspend fun getDocumentListSuspend(request: CatalogDocumentListRequest): Response<CatalogDocumentListResponse> {
+            if (omitDocumentsKeyInList) {
+                return Response.success(CatalogDocumentListResponse(hashMapOf()))
+            }
             val idFilter = request.filter["id"]
             val statusFilter = request.filter["status"] as? String
             val matchingIds = when (idFilter) {
@@ -581,14 +868,27 @@ class CatalogDocumentComingServiceTest {
         }
 
         override suspend fun getProductIdByBarcode(barcode: String): Response<ProductBarcodeResponse> {
+            if (failBarcodeLookupIfAlreadyBound && barcodeToOfferId.containsKey(barcode)) {
+                failBarcodeLookupIfAlreadyBound = false
+                throw java.net.SocketTimeoutException("barcode lookup after bind")
+            }
             val found = barcodeToOfferId[barcode]
             return Response.success(ProductBarcodeResponse(found?.toString() ?: ""))
         }
 
         override suspend fun setBarcodeByProductId(request: BarcodeRequest): Response<BarcodeResponse> {
             barcodeSetCalls.incrementAndGet()
+            throwOnNextBarcodeSet?.let { error ->
+                throwOnNextBarcodeSet = null
+                throw error
+            }
             val existing = barcodeToOfferId.putIfAbsent(request.barcode, request.productid)
-            return if (existing == null || existing == request.productid) {
+            val bound = existing == null || existing == request.productid
+            if (throwAfterBindingBarcode && bound) {
+                throwAfterBindingBarcode = false
+                throw java.net.SocketTimeoutException("timeout after barcode.setbyproductid")
+            }
+            return if (bound) {
                 Response.success(BarcodeResponse(true))
             } else {
                 Response.success(BarcodeResponse(false))
@@ -622,6 +922,10 @@ class CatalogDocumentComingServiceTest {
                 )
             }
             documentStatuses[request.id] = "Y"
+            if (omitDocumentsKeyInListAfterConduct) {
+                omitDocumentsKeyInListAfterConduct = false
+                omitDocumentsKeyInList = true
+            }
             return Response.success(hashMapOf<String, Any?>("result" to true))
         }
 
@@ -667,6 +971,11 @@ class CatalogDocumentComingServiceTest {
             }
             documentElements.getOrPut(docId) { mutableListOf() }.add(row)
 
+            if (throwAfterAddingElement) {
+                throwAfterAddingElement = false
+                throw java.net.SocketTimeoutException("timeout after catalog.document.element.add")
+            }
+
             val docEl = LinkedTreeMap<String, Any?>().apply { put("id", newId.toDouble()) }
             return Response.success(hashMapOf<String, Any?>("result" to hashMapOf<String, Any?>("documentElement" to docEl)))
         }
@@ -707,5 +1016,19 @@ class CatalogDocumentComingServiceTest {
 
         override suspend fun getSecondBlanks(request: BlankRequest): SecondBlankResponse =
             throw UnsupportedOperationException()
+    }
+
+    private class FailingSnapshotEngine(
+        private val delegate: DraftStorageEngine
+    ) : DraftStorageEngine by delegate {
+        @Volatile
+        var failNextSaveFull: Boolean = false
+
+        override fun saveFullComingDraft(record: com.example.scannerkotlin.model.ComingDocumentDraftRecord) {
+            if (failNextSaveFull) {
+                throw RuntimeException("Simulated SQLite disk I/O error")
+            }
+            delegate.saveFullComingDraft(record)
+        }
     }
 }
