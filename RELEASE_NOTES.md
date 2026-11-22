@@ -5,7 +5,7 @@
 
 | Поле | Значение |
 |---|---|
-| Базовый коммит | `e067c0b` + точечные правки tsd-guard (allowlist статуса `N`, `docType=A`, склады, `documentElements`) |
+| Базовый коммит | `2789954` |
 | applicationId | `com.example.scannerkotlin` |
 | versionCode | `2` |
 | versionName | `1.1.0` |
@@ -19,7 +19,7 @@
 
 | Файл | SHA-256 |
 |---|---|
-| `release/1.1.0/tsd-1.1.0-release.apk` | `8061068f26466d01a5f9706764f0a042f9ceca03a0509b8d9de4e66516fbd423` |
+| `release/1.1.0/tsd-1.1.0-release.apk` | `a8f24b44214e33fb7743cfa94c18ad88a84cdf5b015e4f576e7e827f1d29d6cb` |
 | `release/1.1.0/tsd-1.1.0-debug.apk` | `c40fb00930a60b128e4303d1c1becaedd15e8f77c50364727e6a1ed41f7d7d92` |
 
 Проверено `apksigner verify --print-certs`: оба APK подписаны **одним** сертификатом. Удалять приложение перед установкой **нельзя** — пропадут незавершённые приходы.
@@ -32,7 +32,9 @@
 - PHP-тесты: **50/50 PASS** (в т.ч. `status=X`, нет `docType`, пустой список складов, нет/`не массив` `documentElements`).
 - JVM unit-тесты: **73/73 PASS** (включая SQLite/file persistence ST-01… и CX-01…15).
 - `assembleDebug` / `assembleRelease`: **BUILD SUCCESSFUL**.
-- Instrumentation (`connectedDebugAndroidTest`): **NOT RUN** — ADB без устройств.
+- Instrumentation (`connectedDebugAndroidTest`): **NOT RUN**.
+- Обновление 1.0 → 1.1.0 на эмуляторе Pixel_10_Pro_XL: `adb install -r` **Success**; черновик прихода 462 (`DRAFT`, 1 позиция, qty 7.5) сохранился.
+- Исходный APK со склада (1.0 с устройства) **не найден**. 1.0 собран с `e067c0b` на этой машине; сертификат совпал с 1.1.0. Совместимость с **чужим** debug-keystore не подтверждена.
 - Живой Битрикс / CRest / `GET_LOCK` на портале: **NOT RUN**.
 
 ## Этапы на складе
