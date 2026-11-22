@@ -215,10 +215,14 @@ CREATE TABLE tsd_document_item (
 | HTTP | code | Когда |
 |---|---|---|
 | 409 | `BARCODE_FOREIGN_CONFLICT` | штрихкод чужого товара |
-| 409 | `OPERATION_PAYLOAD_CONFLICT` | тот же `operationId` с другим содержимым после commit |
-| 422 | `PARENT_TYPE_UNSUPPORTED` | номенклатура не допускает вариации |
+| 409 | `OPERATION_PAYLOAD_CONFLICT` | тот же `operationId` с другим содержимым |
+| 409 | `OPERATION_IN_PROGRESS` | `GET_LOCK` удерживается другим PHP-процессом |
+| 409 | `DOCUMENT_STATUS_UNVERIFIED` | статус документа не подтверждён; 0 мутаций |
+| 409 | `RECONCILIATION_REQUIRED` | прерванная мутация с неизвестным результатом |
+| 409 | `DOCUMENT_CANCELLED` | документ отменён |
+| 400 | `INVALID_DOCUMENT_ITEM` | ошибка валидации позиции; документ не изменялся |
+| 404 | `DOCUMENT_NOT_FOUND` | документ не найден |
 | 423 | `LOCK_TIMEOUT` | не удалось взять блокировку |
-| 409 | `OPERATION_IN_PROGRESS` | тот же ключ ещё выполняется |
 | 404 | `NOT_FOUND` | метод не установлен (клиент в GUARDED останавливается) |
 
 ## 7. Что делает Android-клиент

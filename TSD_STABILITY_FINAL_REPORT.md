@@ -453,3 +453,43 @@ GUARDED-приёмка работает на атомарном **тестово
 **`READY FOR STAGING`**
 
 Не `READY FOR PILOT`: нет установленного серверного модуля на staging-портале, нет двух физических ТСД, instrumentation **NOT RUN**. Mock-тесты SERVER_GUARDED не заменяют пилот.
+
+---
+
+## 17.13. Серверный модуль tsd-guard: восстановление STARTED и строгий статус (22.11.2026)
+
+### Подтверждённые дефекты `e1bd7de`
+
+| Проблема | Статус |
+|---|---|
+| `STARTED` → вечный `OPERATION_IN_PROGRESS` | **FIXED AND TESTED** (PHP 44/44) |
+| `status=null` / битый `document.list` допускал мутации | **FIXED AND TESTED** |
+| `continue` пропускал битые позиции и проводил документ | **FIXED AND TESTED** |
+| Обрыв между `element.add` и `mapElement` | **FIXED AND TESTED** |
+
+### Что сделано
+
+- Журнал шагов, `progress_json`, resume после смерти PHP (`GET_LOCK` свободен).
+- Неизвестный результат мутации → `RECONCILIATION_REQUIRED`, без второй вариации/строки.
+- Валидация всех позиций до изменений.
+- Android обрабатывает `DOCUMENT_STATUS_UNVERIFIED`, `INVALID_DOCUMENT_ITEM`, `OPERATION_IN_PROGRESS` (CX-13…15).
+- Исходники готовы к staging; **живой Битрикс не вызывался**.
+
+### Тесты, которые реально запускались
+
+| Проверка | Результат |
+|---|---|
+| PHP `tests/run.php` (PHP 8.3.37) | **PASS 44/44** |
+| `php -l` все файлы модуля | **PASS** |
+| `testDebugUnitTest` | **PASS 73/73** |
+| `assembleDebug` | **BUILD SUCCESSFUL** |
+| `assembleRelease` | **NOT RUN** в этой итерации |
+| `connectedDebugAndroidTest` | **NOT RUN** |
+| Staging Bitrix / CRest на портале | **NOT RUN** |
+
+### Готовность
+
+**Исходники серверного модуля: READY FOR STAGING INSTALL**  
+**Приложение: READY FOR STAGING**  
+**Интеграция с реальным Битрикс: NOT VERIFIED**  
+Не `READY FOR PILOT` / не production.

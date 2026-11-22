@@ -1672,11 +1672,12 @@ class CatalogDocumentComingService(
         )
         return try {
             val response = apiBitrix.tsdVariationResolveOrCreate(request)
+            val parsedError = parseTsdGuardError(response.body()?.error, response.body()?.errorDescription, response.errorBody()?.string())
             classifyTsdGuardResponse(
                 code = response.code(),
                 successful = response.isSuccessful,
-                error = response.body()?.error,
-                errorDescription = response.body()?.errorDescription,
+                error = parsedError.first,
+                errorDescription = parsedError.second,
                 unavailableMessage = "Серверная защита вариаций недоступна (${concurrencyMode.toDiagnosticLabel()}). " +
                     "Создание вариации через стандартный REST заблокировано до восстановления tsd.variation.resolveOrCreate.",
                 conflictPrefix = "Позиция №$posNum (${offer.name ?: ""}): "
@@ -1739,11 +1740,12 @@ class CatalogDocumentComingService(
         )
         return try {
             val response = apiBitrix.tsdDocumentSyncAndConduct(request)
+            val parsedError = parseTsdGuardError(response.body()?.error, response.body()?.errorDescription, response.errorBody()?.string())
             classifyTsdGuardResponse(
                 code = response.code(),
                 successful = response.isSuccessful,
-                error = response.body()?.error,
-                errorDescription = response.body()?.errorDescription,
+                error = parsedError.first,
+                errorDescription = parsedError.second,
                 unavailableMessage = "Серверная защита проведения недоступна (${concurrencyMode.toDiagnosticLabel()}). " +
                     "Проведение через стандартный REST заблокировано до восстановления tsd.document.syncAndConduct.",
                 conflictPrefix = ""
@@ -1823,7 +1825,21 @@ class CatalogDocumentComingService(
                 requiresReconciliation = false
             )
         }
-        if (code == 409 || error == "BARCODE_FOREIGN_CONFLICT" || error == "OPERATION_PAYLOAD_CONFLICT") {
+        val reconcilingCodes = setOf(
+            "DOCUMENT_STATUS_UNVERIFIED",
+            "RECONCILIATION_REQUIRED",
+            "CONDUCT_UNCONFIRMED"
+        )
+        if (error in reconcilingCodes) {
+            return TsdGuardOutcome.Failure(
+                message = conflictPrefix + humanizeTsdGuardConflict(error, combined ?: error.orEmpty()),
+                requiresReconciliation = true
+            )
+        }
+        if (code == 409 || error == "BARCODE_FOREIGN_CONFLICT" || error == "OPERATION_PAYLOAD_CONFLICT" ||
+            error == "OPERATION_IN_PROGRESS" || error == "INVALID_DOCUMENT_ITEM" ||
+            error == "DOCUMENT_CANCELLED" || error == "DOCUMENT_NOT_FOUND"
+        ) {
             val detail = combined ?: "конфликт конкурентной операции"
             return TsdGuardOutcome.Failure(
                 message = conflictPrefix + humanizeTsdGuardConflict(error, detail),
@@ -1853,12 +1869,43 @@ class CatalogDocumentComingService(
         return null
     }
 
+    private fun parseTsdGuardError(
+        bodyError: String?,
+        bodyDescription: String?,
+        errorBody: String?
+    ): Pair<String?, String?> {
+        if (!bodyError.isNullOrBlank() || !bodyDescription.isNullOrBlank()) {
+            return bodyError to bodyDescription
+        }
+        if (errorBody.isNullOrBlank()) {
+            return null to null
+        }
+        return try {
+            val parsed = com.google.gson.Gson().fromJson(errorBody, ErrorResponse::class.java)
+            parsed?.error to parsed?.errorDescription
+        } catch (_: Exception) {
+            null to errorBody.take(300)
+        }
+    }
+
     private fun humanizeTsdGuardConflict(error: String?, detail: String): String {
         return when (error) {
             "BARCODE_FOREIGN_CONFLICT" ->
                 "штрихкод уже закреплён за другим товаром. Чужая карточка не изменялась."
             "OPERATION_PAYLOAD_CONFLICT" ->
                 "тот же operationId уже использован с другими параметрами. Повтор с другим содержимым отклонён."
+            "OPERATION_IN_PROGRESS" ->
+                "эта операция ещё выполняется на сервере. Повторите через несколько секунд."
+            "DOCUMENT_STATUS_UNVERIFIED" ->
+                "не удалось подтвердить статус документа в Битрикс. Изменения заблокированы до сверки."
+            "INVALID_DOCUMENT_ITEM" ->
+                if (detail.isNotBlank()) detail else "позиция документа не прошла серверную проверку. Документ не изменялся."
+            "DOCUMENT_CANCELLED" ->
+                "документ отменён в Битрикс и не может быть проведён."
+            "DOCUMENT_NOT_FOUND" ->
+                "документ не найден в Битрикс."
+            "RECONCILIATION_REQUIRED" ->
+                "серверу требуется сверка после прерванной операции. Повторная мутация заблокирована."
             else -> detail
         }
     }

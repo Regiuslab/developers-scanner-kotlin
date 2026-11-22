@@ -1201,6 +1201,68 @@ class CatalogDocumentComingServiceTest {
         assertEquals(1, fakeServer.offerAddCalls.get())
     }
 
+    @Test
+    fun `CX-13 SERVER_GUARDED unverified document status does not mutate`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.tsdDocumentUnverified = true
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.seedDraftDocument(1111)
+        fakeServer.seedExistingOffer(432, 51, "Труба 63", "4600000001111")
+        val item = comingProduct(51, "Труба 63", "4600000001111", 1.0)
+        val (_, service) = newIsolatedClient(fakeServer, "tsd_cx13", BitrixConcurrencyMode.SERVER_GUARDED)
+        val result = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 1111, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertFalse(result.isSuccess)
+        assertEquals(ComingOperationState.RECONCILIATION_REQUIRED, result.state)
+        assertTrue(result.message.orEmpty().contains("статус документа") || result.message.orEmpty().contains("сверк"))
+        assertEquals(0, fakeServer.elementAddCalls.get())
+        assertEquals(0, fakeServer.conductCalls.get())
+    }
+
+    @Test
+    fun `CX-14 SERVER_GUARDED invalid document item does not mutate or fallback`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.tsdInvalidItem = true
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.seedDraftDocument(1112)
+        fakeServer.seedExistingOffer(432, 51, "Труба 63", "4600000001112")
+        val item = comingProduct(51, "Труба 63", "4600000001112", 1.0)
+        val (_, service) = newIsolatedClient(fakeServer, "tsd_cx14", BitrixConcurrencyMode.SERVER_GUARDED)
+        val result = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 1112, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertFalse(result.isSuccess)
+        assertTrue(result.message.orEmpty().contains("вариации") || result.message.orEmpty().contains("INVALID") || result.message.orEmpty().contains("Позиция"))
+        assertEquals(0, fakeServer.elementAddCalls.get())
+        assertEquals(0, fakeServer.conductCalls.get())
+        assertEquals("N", fakeServer.documentStatuses[1112])
+    }
+
+    @Test
+    fun `CX-15 SERVER_GUARDED operation in progress does not start REST fallback`() = runBlocking {
+        fakeServer.tsdGuardEnabled = true
+        fakeServer.tsdInProgress = true
+        fakeServer.seedParentProduct(51, "Труба 63", iblockId = 14, type = 3)
+        fakeServer.seedDraftDocument(1113)
+        val item = comingProduct(51, "Труба 63", "4600000001113", 1.0)
+        val (_, service) = newIsolatedClient(fakeServer, "tsd_cx15", BitrixConcurrencyMode.SERVER_GUARDED)
+        val result = service.conductDocumentSuspend(
+            baseList = emptyList(), idDocument = 1113, context = null, documentComment = null,
+            deletedProducts = emptyList(), updatedProducts = listOf(item),
+            currentProductListState = listOf(item), productOffersList = listOf(ProductOffer(item))
+        )
+        assertFalse(result.isSuccess)
+        assertTrue(result.message.orEmpty().contains("выполняется") || result.message.orEmpty().contains("IN_PROGRESS") || result.message.orEmpty().contains("сервере"))
+        assertEquals(0, fakeServer.offerAddCalls.get())
+        assertEquals(0, fakeServer.elementAddCalls.get())
+        assertEquals(0, fakeServer.conductCalls.get())
+    }
+
     private fun newIsolatedClient(
         server: FakeBitrixPortal,
         folder: String,
@@ -1321,6 +1383,15 @@ class CatalogDocumentComingServiceTest {
 
         @Volatile
         var throwOnNextTsdDocument: Boolean = false
+
+        @Volatile
+        var tsdInProgress: Boolean = false
+
+        @Volatile
+        var tsdDocumentUnverified: Boolean = false
+
+        @Volatile
+        var tsdInvalidItem: Boolean = false
 
         val tsdVariationCalls = AtomicInteger(0)
         val tsdDocumentCalls = AtomicInteger(0)
@@ -1647,6 +1718,9 @@ class CatalogDocumentComingServiceTest {
                 throwOnNextTsdVariation = false
                 throw SocketTimeoutException("timeout before tsd.variation.resolveOrCreate")
             }
+            if (tsdInProgress) {
+                return conflict("OPERATION_IN_PROGRESS", "operation still running")
+            }
             val barcode = request.barcode?.trim().orEmpty()
             val payload = "${request.parentProductId}|$barcode|${request.localItemId}"
             val opKey = "V:${request.operationId}:${request.localItemId}"
@@ -1733,6 +1807,12 @@ class CatalogDocumentComingServiceTest {
             if (throwOnNextTsdDocument) {
                 throwOnNextTsdDocument = false
                 throw SocketTimeoutException("timeout before tsd.document.syncAndConduct")
+            }
+            if (tsdDocumentUnverified) {
+                return conflictDoc("DOCUMENT_STATUS_UNVERIFIED", "document status unknown")
+            }
+            if (tsdInvalidItem) {
+                return conflictDoc("INVALID_DOCUMENT_ITEM", "Позиция №7: отсутствует корректный идентификатор вариации.")
             }
             val payload = request.items.sortedBy { it.localItemId }.joinToString(";") {
                 "${it.localItemId}:${it.offerId}:${it.quantity}:${it.storeTo}:${it.batchNumber.orEmpty()}"

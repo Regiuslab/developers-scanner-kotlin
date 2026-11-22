@@ -1,33 +1,51 @@
 # Портальный модуль tsd-guard
 
-Статус: **написан, не установлен, не integration-tested.**  
-Не считать эти файлы работающим endpoint на `bitrix.izocom.by`.
+Статус исходников: **готовы к установке на staging**.  
+Статус интеграции с живым Битрикс: **не проверено** (портал не вызывался).
 
-Модуль регистрирует REST-методы:
+Методы:
 
 - `tsd.variation.resolveOrCreate`
 - `tsd.document.syncAndConduct`
 
-Они сериализуют конкурентные ТСД через MySQL `GET_LOCK` и таблицу идемпотентности `tsd_operation`. Это не эмуляция на Android.
+## Установка на staging
 
-## Установка (Bitrix24 on-prem)
-
-1. Прогнать `install.sql` на БД портала.
-2. Скопировать каталог в `/local/modules/regiuslab.tsdguard/` **или** подключить `include.php` из `/local/php_interface/init.php`:
+1. Бэкап БД портала.
+2. Новый портал: выполнить `install.sql`. Уже ставили предыдущую версию: `install_upgrade.sql`.
+3. Скопировать каталог в `/local/modules/regiuslab.tsdguard/` (или `/local/php_interface/tsd-guard/`).
+4. В `/local/php_interface/init.php` **после** пролога Битрикс:
 
 ```php
 require_once $_SERVER['DOCUMENT_ROOT'] . '/local/modules/regiuslab.tsdguard/include.php';
 ```
 
-3. Проверить методы тем же webhook, что использует ТСД:
+5. Проверить webhook:
 
 ```
 POST /rest/1/{token}/tsd.variation.resolveOrCreate
+POST /rest/1/{token}/tsd.document.syncAndConduct
 ```
 
-4. На staging-сборке ТСД выставить `bitrix.concurrency.mode=SERVER_GUARDED` в `local.properties`.
-5. Не включать `SERVER_GUARDED` на production, пока не пройден чек-лист из `BITRIX_TSD_SERVER_LOCK_SPEC.md`.
+6. На staging-сборке ТСД: `bitrix.concurrency.mode=SERVER_GUARDED` в `local.properties`.
+7. Не включать `SERVER_GUARDED` на production до чек-листа из `BITRIX_TSD_SERVER_LOCK_SPEC.md`.
 
-## Ограничение
+## Откат
 
-Внутренние вызовы каталога используют REST-обёртки Битрикс (`catalog.product.offer.add` и т.д.) **внутри уже взятого `GET_LOCK`**. Атомарность для клиентов — на границе PHP-запроса, не отдельная ACID-транзакция InnoDB на все таблицы каталога.
+1. На ТСД вернуть `bitrix.concurrency.mode=LEGACY` и пересобрать/поставить APK.
+2. Убрать `require_once ... include.php` из `init.php`.
+3. Методы `tsd.*` перестанут существовать; клиент в LEGACY снова ходит стандартным REST.
+4. Таблицы `tsd_operation*` можно оставить (не мешают) или удалить после бэкапа.
+
+## Восстановление STARTED
+
+Запись `STARTED` **не удаляется по тайм-ауту**. Повтор с тем же `operationId`:
+
+- если блокировка MySQL занята другим соединением → `OPERATION_IN_PROGRESS`;
+- если блокировка свободна (процесс PHP умер, `GET_LOCK` снят) — сверка журнала и Битрикс;
+- неизвестный результат `offer.add` / `element.add` → `RECONCILIATION_REQUIRED`, без второй сущности.
+
+## Ограничения
+
+- Внутренние вызовы идут через `CRest::call`, если класс доступен. На коробочном Битрикс24 без модуля rest/crest установка потребует наличия `CRest` или замены `TsdBitrixRestGateway`.
+- Атомарность для клиентов — граница PHP-запроса + `GET_LOCK`, не одна InnoDB-транзакция на все таблицы каталога.
+- При убийстве процесса PHP MySQL отпускает `GET_LOCK`; это используется для безопасного resume, а не для удаления `STARTED`.
