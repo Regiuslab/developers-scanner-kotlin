@@ -421,8 +421,15 @@ class SgpService(
         val id = result?.documents?.map { x -> x.documentId }
 
 
-        val documentsSuspend = getDocumentsSuspend(id);
-        val docId = documentsSuspend[0].id
+        val documentsSuspend = getDocumentsSuspend(id.orEmpty())
+        val docId = documentsSuspend.firstOrNull()?.id
+        if (docId == null) {
+            Log.e("SgpService", "No active SGP incoming document found for date $formattedDate (ids=$id)")
+            withContext(Dispatchers.Main) {
+                showAlertInfo("На дату $formattedDate не найден черновик документа СГП в Битрикс.", context)
+            }
+            return false
+        }
 
 
         val processResult = processProductOffers(products, context)
@@ -972,6 +979,11 @@ class SgpService(
 
 
     private fun showAlertInfo(message: String, context: Context) {
+        val activity = context as? android.app.Activity
+        if (activity != null && (activity.isFinishing || activity.isDestroyed)) {
+            Log.w("SgpService", "Skipping AlertDialog on finishing/destroyed activity: $message")
+            return
+        }
         AlertDialog.Builder(context).apply {
             setTitle("Предупреждение")
             setMessage(message)

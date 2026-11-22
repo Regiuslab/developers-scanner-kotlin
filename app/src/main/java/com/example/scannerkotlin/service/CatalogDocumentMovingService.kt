@@ -79,7 +79,10 @@ class CatalogDocumentMovingService {
         }
     }
 
-    suspend fun getStoreList(): List<Store> {
+    suspend fun getStoreList(forceRefresh: Boolean = false): List<Store> {
+        if (!forceRefresh) {
+            com.example.scannerkotlin.cache.CatalogReferenceCache.getStores()?.let { return it }
+        }
         return withContext(Dispatchers.IO) {
             try {
                 val response = apiBitrix.getStoreList()
@@ -88,16 +91,18 @@ class CatalogDocumentMovingService {
                     val result = body?.get("result") as? Map<*, *>
                     val stores = result?.get("stores") as? List<*>
 
-                    stores?.mapNotNull { store ->
+                    val mapped = stores?.mapNotNull { store ->
                         (store as? LinkedTreeMap<*, *>)?.let { storeMapper.mapToStore(it) }
                     } ?: emptyList()
+                    com.example.scannerkotlin.cache.CatalogReferenceCache.putStores(mapped)
+                    mapped
                 } else {
                     Log.w("ApiService", "getStoreList failed: ${response.code()} - ${response.message()}")
-                    emptyList()
+                    com.example.scannerkotlin.cache.CatalogReferenceCache.getStores(allowStale = true) ?: emptyList()
                 }
             } catch (e: Exception) {
                 Log.e("ApiService", "Error in getStoreList", e)
-                emptyList()
+                com.example.scannerkotlin.cache.CatalogReferenceCache.getStores(allowStale = true) ?: emptyList()
             }
         }
     }
@@ -394,6 +399,11 @@ class CatalogDocumentMovingService {
 
     
     private fun showAlertInfo(message: String, context: Context) {
+        val activity = context as? android.app.Activity
+        if (activity != null && (activity.isFinishing || activity.isDestroyed)) {
+            Log.w("ApiService", "Skipping AlertDialog on finishing/destroyed activity: $message")
+            return
+        }
         AlertDialog.Builder(context).apply {
             setTitle("Предупреждение")
             setMessage(message)

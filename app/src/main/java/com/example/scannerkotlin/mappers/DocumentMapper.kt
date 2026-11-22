@@ -1,9 +1,10 @@
 package com.example.scannerkotlin.mappers
 
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
 import com.example.scannerkotlin.model.Document
+import com.example.scannerkotlin.utils.BitrixNumberParser
+import com.example.scannerkotlin.utils.TsdLogger
 import com.google.gson.internal.LinkedTreeMap
 import java.time.OffsetDateTime
 import java.time.format.DateTimeFormatter
@@ -13,38 +14,37 @@ class DocumentMapper {
     fun mapToDocument(documentMap: LinkedTreeMap<*, *>): Document? {
         return try {
             val formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
-
             Document(
                 commentary = documentMap["commentary"] as? String,
-                createdBy = (documentMap["createdBy"] as? Double)?.toInt() ?: 0,
+                createdBy = BitrixNumberParser.toIntOrDefault(documentMap["createdBy"], 0),
                 currency = documentMap["currency"] as? String ?: "",
                 dateCreate = parseDate(documentMap["dateCreate"] as? String, formatter),
                 dateDocument = parseDate(documentMap["dateDocument"] as? String, formatter),
                 dateModify = parseDate(documentMap["dateModify"] as? String, formatter),
                 dateStatus = parseDate(documentMap["dateStatus"] as? String, formatter),
-                docNumber = documentMap["docNumber"] as? String,
-                docType = documentMap["docType"] as? String,
-                id = (documentMap["id"] as? Double)?.toInt(),
-                modifiedBy = (documentMap["modifiedBy"] as? Double)?.toInt(),
-                responsibleId = (documentMap["responsibleId"] as? Double)?.toInt(),
+                docNumber = documentMap["docNumber"]?.toString(),
+                docType = documentMap["docType"]?.toString(),
+                id = BitrixNumberParser.toIntOrNull(documentMap["id"]),
+                modifiedBy = BitrixNumberParser.toIntOrNull(documentMap["modifiedBy"]),
+                responsibleId = BitrixNumberParser.toIntOrNull(documentMap["responsibleId"]),
                 siteId = documentMap["siteId"] as? String,
-                status = documentMap["status"] as? String,
-                statusBy = (documentMap["statusBy"] as? Double)?.toInt(),
-                title = documentMap["title"] as? String,
-                total = documentMap["total"] as? Double
+                status = documentMap["status"]?.toString(),
+                statusBy = BitrixNumberParser.toIntOrNull(documentMap["statusBy"]),
+                title = documentMap["title"]?.toString(),
+                total = BitrixNumberParser.toDoubleOrNull(documentMap["total"])
             )
         } catch (e: Exception) {
-            Log.e("DocumentMapper", "Error mapping document: ${e.message}")
+            TsdLogger.warn(category = "MAPPER", event = "document_map_failed", throwable = e)
             null
         }
     }
 
     @RequiresApi(Build.VERSION_CODES.O)
     private fun parseDate(dateString: String?, formatter: DateTimeFormatter): OffsetDateTime? {
+        if (dateString.isNullOrBlank()) return null
         return try {
-            dateString?.let { OffsetDateTime.parse(it, formatter) }
-        } catch (e: Exception) {
-            Log.e("DocumentMapper", "Error parsing date: $dateString", e)
+            OffsetDateTime.parse(dateString, formatter)
+        } catch (_: Exception) {
             null
         }
     }

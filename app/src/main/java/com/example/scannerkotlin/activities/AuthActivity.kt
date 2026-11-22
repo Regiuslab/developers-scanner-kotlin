@@ -2,63 +2,65 @@ package com.example.scannerkotlin.activities
 
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.example.scannerkotlin.R
 import com.example.scannerkotlin.dto.UserCredentials
-import com.example.scannerkotlin.utils.DeveloperCredits
-import com.example.scannerkotlin.utils.SessionManager
 import com.example.scannerkotlin.service.UserService
 import com.example.scannerkotlin.utils.AppUserRoles
+import com.example.scannerkotlin.utils.DeveloperCredits
+import com.example.scannerkotlin.utils.SessionManager
+import com.example.scannerkotlin.utils.TsdLogger
 import com.google.android.material.button.MaterialButton
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import retrofit2.HttpException
-
-
-
 
 class AuthActivity : AppCompatActivity() {
 
     private lateinit var userService: UserService
     private val enteredPassword = StringBuilder()
     private lateinit var dotViews: List<ImageView>
-    private val authScope = CoroutineScope(Dispatchers.Main)
+    private var isVerifyingPin = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
 
         if (SessionManager.isUserLoggedIn()) {
             val userId = SessionManager.getUserId()
             val userRole = SessionManager.getUserRole()
 
-            if (userRole != null) {
-                Log.i("AuthActivity", "User already logged in (userId: $userId, role: $userRole). Redirecting.")
+            if (userRole != null && isSupportedRole(userRole)) {
+                TsdLogger.info(
+                    category = "AUTH",
+                    event = "session_restored",
+                    fields = mapOf("userId" to userId, "role" to userRole)
+                )
                 navigateToActivityBasedOnRole(userRole)
-
                 return
             } else {
-                Log.w("AuthActivity", "User logged in (userId: $userId) but role is missing. Clearing session.")
+                TsdLogger.warn(
+                    category = "AUTH",
+                    event = "invalid_or_missing_role_cleared",
+                    fields = mapOf("userId" to userId, "role" to userRole)
+                )
                 SessionManager.clearSession()
             }
         }
 
-
         setupAuthScreen()
+    }
+
+    private fun isSupportedRole(role: String): Boolean {
+        val normalized = role.trim().uppercase()
+        return normalized == AppUserRoles.storekeeper.uppercase() ||
+            normalized == AppUserRoles.otk.uppercase()
     }
 
     private fun setupAuthScreen() {
         setContentView(R.layout.activity_auth)
-        Log.i("AuthActivity", "Setting up authentication screen.")
-
         userService = UserService()
 
         dotViews = listOf(
@@ -83,6 +85,7 @@ class AuthActivity : AppCompatActivity() {
 
         buttonIds.forEach { buttonId ->
             findViewById<MaterialButton>(buttonId).setOnClickListener { button ->
+                if (isVerifyingPin) return@setOnClickListener
                 if (enteredPassword.length < 4) {
                     enteredPassword.append((button as MaterialButton).text)
                     updatePasswordDots()
@@ -95,6 +98,7 @@ class AuthActivity : AppCompatActivity() {
         }
 
         findViewById<MaterialButton>(R.id.btnDelete).setOnClickListener {
+            if (isVerifyingPin) return@setOnClickListener
             if (enteredPassword.isNotEmpty()) {
                 enteredPassword.deleteCharAt(enteredPassword.length - 1)
                 updatePasswordDots()
@@ -111,43 +115,66 @@ class AuthActivity : AppCompatActivity() {
     }
 
     private fun checkPasswordViaApi() {
+        if (isVerifyingPin) return
         val enteredPass = enteredPassword.toString()
-        Log.d("AuthActivity", "Attempting login with password: $enteredPass")
+        isVerifyingPin = true
 
-
-        authScope.launch {
+        lifecycleScope.launch {
             try {
                 val userCredentialsList: List<UserCredentials>? = userService.getPasswords(enteredPass)
 
-
                 if (!userCredentialsList.isNullOrEmpty()) {
-
                     val user = userCredentialsList.first()
+                    if (!isSupportedRole(user.role)) {
+                        TsdLogger.warn(
+                            category = "AUTH",
+                            event = "unsupported_role_rejected",
+                            fields = mapOf("userId" to user.id, "role" to user.role)
+                        )
+                        Toast.makeText(
+                            this@AuthActivity,
+                            "Неподдерживаемая роль пользователя (${user.role})",
+                            Toast.LENGTH_LONG
+                        ).show()
+                        clearPasswordInput()
+                        return@launch
+                    }
 
-                    Log.i("AuthActivity", "API check successful for userId: ${user.id}, role: ${user.role}. Saving session.")
-
-
+                    TsdLogger.info(
+                        category = "AUTH",
+                        event = "login_success",
+                        fields = mapOf("userId" to user.id, "role" to user.role)
+                    )
                     SessionManager.saveSession(user.id, user.role)
-
-
                     navigateToActivityBasedOnRole(user.role)
-
                 } else {
-                    Log.w("AuthActivity", "Incorrect password entered (API check).")
+                    TsdLogger.info(category = "AUTH", event = "login_wrong_pin")
                     Toast.makeText(this@AuthActivity, "Неверный пароль", Toast.LENGTH_SHORT).show()
                     clearPasswordInput()
                 }
-
             } catch (e: HttpException) {
-
-                Log.e("AuthActivity", "API HTTP Error during password check", e)
-                Toast.makeText(this@AuthActivity, "Ошибка сети (${e.code()}). Попробуйте позже.", Toast.LENGTH_LONG).show()
+                TsdLogger.error(
+                    category = "AUTH",
+                    event = "login_http_error",
+                    fields = mapOf("code" to e.code()),
+                    throwable = e
+                )
+                Toast.makeText(
+                    this@AuthActivity,
+                    "Ошибка сети (${e.code()}). Попробуйте позже.",
+                    Toast.LENGTH_LONG
+                ).show()
                 clearPasswordInput()
             } catch (e: Exception) {
-
-                Log.e("AuthActivity", "API Error during password check", e)
-                Toast.makeText(this@AuthActivity, "Ошибка при проверке пароля. Проверьте соединение.", Toast.LENGTH_LONG).show()
+                TsdLogger.error(category = "AUTH", event = "login_network_error", throwable = e)
+                Toast.makeText(
+                    this@AuthActivity,
+                    "Ошибка при проверке пароля. Проверьте соединение.",
+                    Toast.LENGTH_LONG
+                ).show()
                 clearPasswordInput()
+            } finally {
+                isVerifyingPin = false
             }
         }
     }
@@ -158,29 +185,15 @@ class AuthActivity : AppCompatActivity() {
     }
 
     private fun navigateToActivityBasedOnRole(role: String) {
-        Log.d("AuthActivity", "Navigating based on role: $role")
-        val intent = when (role.uppercase()) {
-            AppUserRoles.storekeeper.uppercase() -> {
-                Log.i("AuthActivity", "Redirecting to AdminActivity")
-                Intent(this, MainActivity::class.java)
-            }
-            AppUserRoles.otk.uppercase() -> {
-                Log.i("AuthActivity", "Redirecting to MontagActivity")
-                Intent(this, OtkActivity::class.java)
-            }
-
+        val intent = when (role.trim().uppercase()) {
+            AppUserRoles.storekeeper.uppercase() -> Intent(this, MainActivity::class.java)
+            AppUserRoles.otk.uppercase() -> Intent(this, OtkActivity::class.java)
             else -> {
-                Log.w("AuthActivity", "Unknown or default role: $role. Redirecting to MainActivity.")
-                Intent(this, AuthActivity::class.java)
+                SessionManager.clearSession()
+                return
             }
         }
-
         startActivity(intent)
         finishAffinity()
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        authScope.cancel()
     }
 }

@@ -45,8 +45,10 @@ class SgpActivity : BaseScanActivity() {
     private lateinit var adapter: ProductScanAdapter
     private  var spendButton: MaterialButton? = null
     private lateinit var progressBar: ProgressBar
+    private val scanGate = com.example.scannerkotlin.utils.BarcodeScanGate(duplicateWindowMs = 450L)
 
     override fun onBarcodeScanned(barcode: String) {
+        if (!scanGate.tryAcquire(barcode)) return
         processBarcode(barcode)
     }
 
@@ -192,6 +194,7 @@ class SgpActivity : BaseScanActivity() {
                 Log.e("SgpActivity", "Unexpected error processing barcode $barcode", e)
                 withContext(Dispatchers.Main) { showAlertInfo("Произошла ошибка при обработке штрихкода: ${e.message}") }
             } finally {
+                scanGate.release()
                 showLoading(false)
             }
         }
@@ -348,7 +351,10 @@ class SgpActivity : BaseScanActivity() {
         Log.d("SgpActivity", "Removed product: ${removedProduct.name} at position $position")
         
         adapter.notifyItemRemoved(position)
-        adapter.notifyItemRangeChanged(position, products.size)
+        val remainingCount = products.size - position
+        if (remainingCount > 0) {
+            adapter.notifyItemRangeChanged(position, remainingCount)
+        }
         
         if (products.isEmpty()) {
             adapter.notifyDataSetChanged()

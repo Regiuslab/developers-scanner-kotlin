@@ -1,52 +1,33 @@
 package com.example.scannerkotlin.mappers
 
 import com.example.scannerkotlin.model.Product
-import com.google.gson.internal.LinkedTreeMap // Используется если map приходит от Gson без строгого типа
-import android.util.Log // Для логирования, если необходимо
+import com.example.scannerkotlin.utils.BitrixNumberParser
+import com.google.gson.internal.LinkedTreeMap
 
 class ProductMapper {
     fun mapToProduct(map: LinkedTreeMap<*, *>): Product {
         val parentIdRaw = map["parentId"]
-        var parsedParentId: Int? = null
-
-        if (parentIdRaw != null) {
-            if (parentIdRaw is LinkedTreeMap<*, *>) {
-
-                val parentIdValueRaw = parentIdRaw["value"]
-                if (parentIdValueRaw is String) {
-                    parsedParentId = parentIdValueRaw.toIntOrNull()
-                } else if (parentIdValueRaw is Double) {
-                    parsedParentId = parentIdValueRaw.toInt()
-                } else if (parentIdValueRaw is Number) {
-                    parsedParentId = parentIdValueRaw.toInt()
-                }
-
-            } else if (parentIdRaw is String) {
-
-                parsedParentId = parentIdRaw.toIntOrNull()
-            } else if (parentIdRaw is Double) {
-                parsedParentId = parentIdRaw.toInt()
-            } else if (parentIdRaw is Number) {
-
-                parsedParentId = parentIdRaw.toInt()
-            }
-
+        val parsedParentId: Int? = when (parentIdRaw) {
+            is Map<*, *> -> BitrixNumberParser.toIntOrNull(parentIdRaw["value"])
+            else -> BitrixNumberParser.toIntOrNull(parentIdRaw)
         }
 
-        return Product(
+        val product = Product(
             idInDocument = null,
-            id = (map["id"] as? Double)?.toInt() ?: (map["id"] as? Number)?.toInt() ?: 0,
-            iblockId = (map["iblockId"] as? Double)?.toInt() ?: (map["iblockId"] as? Number)?.toInt() ?: 0,
-            name = map["name"] as? String,
-            measureId = (map["measure"] as? Double)?.toInt() ?: (map["measure"] as? Number)?.toInt(),
+            id = BitrixNumberParser.toIntOrDefault(map["id"], 0),
+            iblockId = BitrixNumberParser.toIntOrDefault(map["iblockId"], 0),
+            name = map["name"]?.toString(),
+            measureId = BitrixNumberParser.toIntOrNull(map["measure"]),
             measureSymbol = null,
-            quantity = (map["quantity"] as? Double)?.toDouble() ?: (map["quantity"] as? Number)?.toDouble(),
+            quantity = BitrixNumberParser.toDoubleOrNull(map["quantity"]),
             barcode = map["barcode"] as? String,
-            diameter = (map["width"] as? Double)?.toDouble() ?: (map["width"] as? Number)?.toDouble(),
-            weight = (map["weight"] as? Double)?.toDouble() ?: (map["weight"] as? Number)?.toDouble(),
-            height = (map["height"] as? Double)?.toDouble() ?: (map["height"] as? Number)?.toDouble(),
+            diameter = BitrixNumberParser.toDoubleOrNull(map["width"]),
+            weight = BitrixNumberParser.toDoubleOrNull(map["weight"]),
+            height = BitrixNumberParser.toDoubleOrNull(map["height"]),
             parentId = parsedParentId,
             storeAmount = null
         )
+        product.catalogProductType = BitrixNumberParser.toIntOrNull(map["type"])
+        return product
     }
 }

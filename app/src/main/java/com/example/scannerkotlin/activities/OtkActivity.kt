@@ -43,8 +43,10 @@ class OtkActivity : BaseScanActivity() {
     private lateinit var scanPromptTextView: TextView
 
     private var service: OtkService? = null
+    private val scanGate = com.example.scannerkotlin.utils.BarcodeScanGate(duplicateWindowMs = 500L)
 
     override fun onBarcodeScanned(barcode: String) {
+        if (!scanGate.tryAcquire(barcode)) return
         processBarcode(barcode)
     }
 
@@ -185,7 +187,7 @@ class OtkActivity : BaseScanActivity() {
                     showAlertInfo("Произошла ошибка при обработке штрихкода: ${e.message}")
                 }
             } finally {
-
+                scanGate.release()
                 if (progressBar.visibility == View.VISIBLE) {
                     withContext(Dispatchers.Main) { showLoading(false) }
                 }
