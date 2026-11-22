@@ -1,7 +1,7 @@
 # Отчёт по серверному модулю tsd-guard
 
 Дата: 22.11.2026  
-Коммит-база: `e1bd7de` + исправления этой итерации.
+Коммит-база: `e067c0b` + allowlist `tsd_staging_safety` (ручной перенос).
 
 Живой Битрикс **не вызывался**. Успешная интеграция с порталом **не заявлена**.
 
@@ -34,10 +34,10 @@
 
 Команда: `php portal/tsd-guard/tests/run.php` (PHP 8.3.37).
 
-**Результат: 44 passed, 0 failed.**  
+**Результат: 50 passed, 0 failed.**  
 `php -l` по всем файлам модуля: **No syntax errors**.
 
-Покрыто: идемпотентность вариаций, resume STARTED, crash после offer.add/barcode/element.add, payload conflict, in-progress lock, null/пустой/500/timeout статуса, 10 позиций, ошибка 10-й, дубль localItemId, два `offerId` в разных партиях, 2/5/10 клиентов, 100 повторов, два ТСД на один документ.
+Покрыто: идемпотентность вариаций, resume STARTED, crash после offer.add/barcode/element.add, payload conflict, in-progress lock, null/пустой/500/timeout статуса, **status=X**, **нет docType**, **docType=M**, **пустой список складов**, **нет documentElements**, **documentElements не массив**, 10 позиций, ошибка 10-й, дубль localItemId, два `offerId` в разных партиях, 2/5/10 клиентов, 100 повторов, два ТСД на один документ.
 
 ## 5. Не проверено
 

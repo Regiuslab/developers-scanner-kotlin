@@ -253,6 +253,76 @@ $d = new TsdDocumentEngine(new InMemoryOperationStore(), new InMemoryLockManager
 $ok = $d->syncAndConduct(['operationId' => 'd8', 'documentId' => 16, 'items' => [docItem('a', 432, 3)]]);
 t_assert($ok['status'] === 'Y' && ($bx->stockMoved[16] ?? 0) === 3.0, 'valid draft conducts once');
 
+$bx = new FakeBitrixGateway();
+$bx->seedDocument(17, 'X');
+$bx->seedOffer(432, 51);
+$d = new TsdDocumentEngine(new InMemoryOperationStore(), new InMemoryLockManager(), $bx);
+try {
+    $d->syncAndConduct(['operationId' => 'd-status-x', 'documentId' => 17, 'items' => [docItem('a', 432)]]);
+    t_assert(false, 'unknown status X blocked');
+} catch (TsdGuardException $e) {
+    t_assert($e->errorCode === 'DOCUMENT_STATUS_UNVERIFIED' && count($bx->mutating) === 0, 'status=X: zero mutations');
+}
+
+$bx = new FakeBitrixGateway();
+$bx->seedDocument(18, 'N');
+$bx->seedOffer(432, 51);
+$bx->omitDocumentType = true;
+$d = new TsdDocumentEngine(new InMemoryOperationStore(), new InMemoryLockManager(), $bx);
+try {
+    $d->syncAndConduct(['operationId' => 'd-no-type', 'documentId' => 18, 'items' => [docItem('a', 432)]]);
+    t_assert(false, 'missing docType blocked');
+} catch (TsdGuardException $e) {
+    t_assert($e->errorCode === 'INVALID_REQUEST' && count($bx->mutating) === 0, 'missing docType: zero mutations');
+}
+
+$bx = new FakeBitrixGateway();
+$bx->seedDocument(19, 'N', 'M');
+$bx->seedOffer(432, 51);
+$d = new TsdDocumentEngine(new InMemoryOperationStore(), new InMemoryLockManager(), $bx);
+try {
+    $d->syncAndConduct(['operationId' => 'd-type-m', 'documentId' => 19, 'items' => [docItem('a', 432)]]);
+    t_assert(false, 'moving docType blocked');
+} catch (TsdGuardException $e) {
+    t_assert($e->errorCode === 'INVALID_REQUEST' && count($bx->mutating) === 0, 'docType=M: zero mutations');
+}
+
+$bx = new FakeBitrixGateway();
+$bx->seedDocument(50, 'N');
+$bx->seedOffer(432, 51);
+$bx->stores = [];
+$d = new TsdDocumentEngine(new InMemoryOperationStore(), new InMemoryLockManager(), $bx);
+try {
+    $d->syncAndConduct(['operationId' => 'd-empty-stores', 'documentId' => 50, 'items' => [docItem('a', 432)]]);
+    t_assert(false, 'empty store list blocked');
+} catch (TsdGuardException $e) {
+    t_assert($e->errorCode === 'INVALID_DOCUMENT_ITEM' && count($bx->mutating) === 0, 'empty stores: zero mutations');
+}
+
+$bx = new FakeBitrixGateway();
+$bx->seedDocument(51, 'N');
+$bx->seedOffer(432, 51);
+$bx->omitDocumentElementsKey = true;
+$d = new TsdDocumentEngine(new InMemoryOperationStore(), new InMemoryLockManager(), $bx);
+try {
+    $d->syncAndConduct(['operationId' => 'd-no-elements', 'documentId' => 51, 'items' => [docItem('a', 432)]]);
+    t_assert(false, 'missing documentElements blocked');
+} catch (TsdGuardException $e) {
+    t_assert($e->errorCode === 'RECONCILIATION_REQUIRED' && count($bx->mutating) === 0, 'missing documentElements: zero mutations');
+}
+
+$bx = new FakeBitrixGateway();
+$bx->seedDocument(52, 'N');
+$bx->seedOffer(432, 51);
+$bx->documentElementsNotArray = true;
+$d = new TsdDocumentEngine(new InMemoryOperationStore(), new InMemoryLockManager(), $bx);
+try {
+    $d->syncAndConduct(['operationId' => 'd-bad-elements', 'documentId' => 52, 'items' => [docItem('a', 432)]]);
+    t_assert(false, 'non-array documentElements blocked');
+} catch (TsdGuardException $e) {
+    t_assert($e->errorCode === 'RECONCILIATION_REQUIRED' && count($bx->mutating) === 0, 'documentElements not array: zero mutations');
+}
+
 echo "\n[DOCUMENT validation]\n";
 $bx = new FakeBitrixGateway();
 $bx->seedDocument(20, 'N');

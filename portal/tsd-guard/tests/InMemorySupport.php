@@ -111,13 +111,20 @@ class FakeBitrixGateway implements TsdBitrixGateway
     public $unverifiedMethod = null;
     public $omitDocumentsKey = false;
     public $nullDocumentStatus = false;
+    public $omitDocumentType = false;
+    public $omitDocumentElementsKey = false;
+    public $documentElementsNotArray = false;
     public $http500 = false;
     public $timeout = false;
     public $stockMoved = [];
 
-    public function seedDocument(int $id, string $status = 'N'): void
+    public function seedDocument(int $id, string $status = 'N', $docType = 'A'): void
     {
-        $this->documents[$id] = ['id' => $id, 'docType' => 'A', 'status' => $status];
+        $doc = ['id' => $id, 'status' => $status];
+        if ($docType !== null) {
+            $doc['docType'] = $docType;
+        }
+        $this->documents[$id] = $doc;
         $this->elements[$id] = $this->elements[$id] ?? [];
     }
 
@@ -224,9 +231,18 @@ class FakeBitrixGateway implements TsdBitrixGateway
                 if ($this->nullDocumentStatus) {
                     $doc['status'] = null;
                 }
+                if ($this->omitDocumentType) {
+                    unset($doc['docType']);
+                }
                 return ['documents' => [$doc]];
             case 'catalog.document.element.list':
                 $docId = (int)($params['filter']['docId'] ?? 0);
+                if ($this->omitDocumentElementsKey) {
+                    return [];
+                }
+                if ($this->documentElementsNotArray) {
+                    return ['documentElements' => 'not-an-array'];
+                }
                 return ['documentElements' => $this->elements[$docId] ?? []];
             case 'catalog.document.element.add':
                 $docId = (int)$params['fields']['docId'];

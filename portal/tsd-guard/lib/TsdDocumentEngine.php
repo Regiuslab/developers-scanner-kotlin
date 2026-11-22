@@ -93,6 +93,15 @@ class TsdDocumentEngine
                     409
                 );
             }
+            // Explicit allowlist: never mutate a document with an unknown state.
+            // Bitrix catalog.document.status used by this client: N=draft, Y=conducted, C=cancelled.
+            if ($doc['status'] !== 'N') {
+                throw new TsdGuardException(
+                    'Недопустимый статус документа для проведения: ' . $doc['status'],
+                    'DOCUMENT_STATUS_UNVERIFIED',
+                    409
+                );
+            }
 
             if (!$existing) {
                 $this->writeStarted($opKey, $operationId, $documentId, $payloadHash, 'STARTED', ['items' => []]);
@@ -174,14 +183,14 @@ class TsdDocumentEngine
                 $this->invalidItem($pos, $localItemId, 'вариация ID ' . $offerId . ' не найдена.');
             }
 
-            if ($storeIds !== null && !in_array($storeTo, $storeIds, true)) {
+            if (!in_array($storeTo, $storeIds, true)) {
                 $this->invalidItem($pos, $localItemId, 'склад ID ' . $storeTo . ' не существует.');
             }
         }
     }
 
-    /** @return int[]|null null when the portal has no store list (skip existence check) */
-    private function loadStoreIds(): ?array
+    /** @return int[] Empty verified list means no valid destination stores. */
+    private function loadStoreIds(): array
     {
         $store = $this->bitrix->call('catalog.store.list', []);
         if (!$store['ok'] || !$store['verified']) {
@@ -200,7 +209,7 @@ class TsdDocumentEngine
                 }
             }
         }
-        return $storeIds === [] ? null : $storeIds;
+        return $storeIds;
     }
 
     private function invalidItem(int $pos, string $localItemId, string $reason): void
@@ -256,7 +265,7 @@ class TsdDocumentEngine
             );
         }
         $docType = (string)($doc['docType'] ?? '');
-        if ($docType !== '' && $docType !== 'A') {
+        if ($docType !== 'A') {
             throw new TsdGuardException('Тип документа не является приходом.', 'INVALID_REQUEST', 400);
         }
         return ['status' => strtoupper((string)$status), 'docType' => $docType];
@@ -423,7 +432,16 @@ class TsdDocumentEngine
                 409
             );
         }
-        return $resp['result']['documentElements'] ?? [];
+        $result = $resp['result'];
+        if (!is_array($result) || !array_key_exists('documentElements', $result)
+            || !is_array($result['documentElements'])) {
+            throw new TsdGuardException(
+                'Ответ о строках документа неполон; создание новых строк заблокировано до сверки.',
+                'RECONCILIATION_REQUIRED',
+                409
+            );
+        }
+        return $result['documentElements'];
     }
 
     private function alreadyConductedResult(string $operationId, int $documentId, array $items): array

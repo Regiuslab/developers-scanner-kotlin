@@ -1,6 +1,6 @@
 # ИТОГОВЫЙ ТЕХНИЧЕСКИЙ ОТЧЁТ ПО СТАБИЛИЗАЦИИ ПРИЛОЖЕНИЯ ТСД (`TSD_STABILITY_FINAL_REPORT.md`)
 
-**Дата:** 22.11.2026 (обновлено: P1 конкуренция ТСД, режимы LEGACY / SERVER_GUARDED)  
+**Дата:** 22.11.2026 (обновлено: пакет 1.1.0 для контролируемого боевого тестирования)  
 **Проект:** `ScannerKotlin` (`com.example.scannerkotlin`, `minSdk = 24`, `targetSdk = 35`, `compileSdk = 35`)  
 **Связанный документ аудита:** `AUDIT_REPORT.md`
 
@@ -493,3 +493,59 @@ GUARDED-приёмка работает на атомарном **тестово
 **Приложение: READY FOR STAGING**  
 **Интеграция с реальным Битрикс: NOT VERIFIED**  
 Не `READY FOR PILOT` / не production.
+
+---
+
+## 17.14. Пакет 1.1.0 для контролируемого боевого тестирования (22.11.2026)
+
+База: `e067c0b`. Патч `tsd_staging_safety.patch` **не наложился** (`git apply --check` — конфликт контекста у `loadStoreIds` / `listElements`). Те же четыре проверки перенесены вручную в `TsdDocumentEngine.php`.
+
+### Allowlist приходного документа (по клиенту и REST-контракту приложения)
+
+Живой ответ Битрикс в этой итерации **не снимался**. Использованы поля, которые уже ходит Android и фейковый портал:
+
+| Поле | Допустимо для мутаций | Поведение |
+|---|---|---|
+| `docType` | только `A` (приход) | нет поля / `M` / иное → `INVALID_REQUEST`, 0 мутаций. Фильтр `catalog.document.list` тоже `docType=A` |
+| `status` | только `N` | `Y` → идемпотентный `alreadyConducted`; `C` → `DOCUMENT_CANCELLED`; `null`/пусто/`X`/прочее → `DOCUMENT_STATUS_UNVERIFIED` |
+| `catalog.store.list` | непустой проверенный список | пустой массив → нет допустимых складов, `INVALID_DOCUMENT_ITEM` |
+| `catalog.document.element.list` | ключ `documentElements` = массив | нет ключа / не массив → `RECONCILIATION_REQUIRED`, без `element.add` |
+
+Отмена статусом `C` принята из Android-клиента; на коробочном портале это **не верифицировано**. Если живой API использует другой код отмены — потребуется правка allowlist **до** `SERVER_GUARDED`.
+
+### Прогоны этой итерации
+
+| Проверка | Результат |
+|---|---|
+| `git apply --check tsd_staging_safety.patch` | **FAIL** (контекст); исправления внесены вручную |
+| PHP 8.3.37 `php -l` все `portal/tsd-guard/**/*.php` | **PASS** |
+| PHP `tests/run.php` | **PASS 50/50** |
+| `testDebugUnitTest` | **PASS 73/73** (0 fail / 0 error / 0 skip) |
+| `compileDebugAndroidTestKotlin` | **PASS** |
+| `connectedDebugAndroidTest` (SQLite v1→v2 на устройстве) | **NOT RUN** — `adb devices` пустой |
+| `assembleDebug` | **BUILD SUCCESSFUL** |
+| `assembleRelease` | **BUILD SUCCESSFUL** (повтор после file lock `mergeDexRelease`) |
+| `apksigner verify` debug+release | **PASS**, один Android Debug сертификат |
+| `BITRIX_CONCURRENCY_MODE` в BuildConfig | **LEGACY** |
+| Staging/боевой Битрикс, CRest, GET_LOCK | **NOT RUN** |
+
+### APK
+
+| | |
+|---|---|
+| versionName / versionCode | `1.1.0` / `2` |
+| applicationId | `com.example.scannerkotlin` |
+| Подпись SHA-256 | `96e5589a5760549d5d72d969bd05b52ba85afb06bcb676684cc6251d4b7866c0` (Android Debug, debug = release) |
+| `tsd-1.1.0-release.apk` SHA-256 | `8061068f26466d01a5f9706764f0a042f9ceca03a0509b8d9de4e66516fbd423` |
+| `tsd-1.1.0-debug.apk` SHA-256 | `c40fb00930a60b128e4303d1c1becaedd15e8f77c50364727e6a1ed41f7d7d92` |
+| Сохранность черновиков при обновлении | schema SQLite остаётся v2; `versionCode` 2 поверх 1; подпись не менялась. Живая установка на ТСД **не выполнялась** |
+
+### SERVER_GUARDED
+
+В этой сборке **выключен**. На боевом портале не включать, пока `portal/tsd-guard/` не установлен и не проверен на staging.
+
+### Готовность пакета
+
+**APK собран и подписан (debug-keystore). Исходники готовы к передаче на Этап А.**  
+**Этап Б (проведение на бою) — не открыт:** серверный модуль не проверялся на реальном Битрикс.  
+Не `READY FOR PILOT`. Не successful production release.
