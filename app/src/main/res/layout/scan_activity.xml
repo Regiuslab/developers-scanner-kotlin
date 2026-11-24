@@ -48,15 +48,60 @@
         tools:text="Всего продуктов: 15" />
 
 
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnSoftwareScan"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="8dp"
+        android:layout_marginEnd="16dp"
+        android:backgroundTint="@color/inventory_scan_button_tint"
+        android:contentDescription="@string/inventory_scan_action"
+        android:insetTop="0dp"
+        android:insetBottom="0dp"
+        android:minHeight="72dp"
+        android:text="@string/inventory_scan_action"
+        android:textAllCaps="false"
+        android:textColor="@color/dark_blue"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        app:cornerRadius="16dp"
+        app:icon="@drawable/ic_barcode"
+        app:iconGravity="textStart"
+        app:iconPadding="12dp"
+        app:iconSize="28dp"
+        app:iconTint="@color/dark_blue"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/rectangle" />
+
+    <TextView
+        android:id="@+id/scanSessionStatus"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="16dp"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="16dp"
+        android:gravity="center"
+        android:text="@string/inventory_scan_active_hint"
+        android:textColor="@color/yellow"
+        android:textSize="16sp"
+        android:visibility="gone"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/btnSoftwareScan"
+        tools:visibility="visible" />
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycleViewScan"
         android:layout_width="0dp"
         android:layout_height="0dp"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@+id/rectangle"
-        android:orientation="horizontal"/>
+        app:layout_constraintTop_toBottomOf="@id/scanSessionStatus" />
 
     <ProgressBar
         android:id="@+id/progressBarScan"

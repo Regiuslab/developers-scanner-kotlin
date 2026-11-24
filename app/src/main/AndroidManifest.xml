@@ -5,6 +5,16 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
+    <uses-sdk tools:overrideLibrary="com.xcheng.scanner" />
+
+    <!-- XCheng scan service is a separate app on the TSD. Android 11+ hides it unless queried. -->
+    <queries>
+        <package android:name="com.xcheng.scannere3" />
+        <intent>
+            <action android:name="com.xcheng.scannere3.scanservice" />
+        </intent>
+    </queries>
+
     <!-- Warehouse TSD client. Developed by RegiusLab — https://regiuslab.by/ -->
     <application
         android:name=".MyApplication"

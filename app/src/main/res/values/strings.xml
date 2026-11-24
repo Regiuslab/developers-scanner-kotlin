@@ -1,6 +1,10 @@
 <resources>
     <string name="app_name">Склад</string>
     <string name="ScanText">ОТСКАНИРОВАННЫЕ ТОВАРЫ</string>
+    <string name="inventory_scan_action">Сканировать</string>
+    <string name="inventory_scan_active_button">Сканирование…</string>
+    <string name="inventory_scan_active_hint">Наведите сканер на штрихкод</string>
+    <string name="inventory_scan_unavailable">Аппаратный сканер недоступен. Используйте кнопку сканирования на корпусе ТСД.</string>
     <string name="mainText">ГЛАВНОЕ МЕНЮ</string>
     <string name="scanButton">ИНВЕНТАРИЗАЦИЯ</string>
     <string name="productsButton">ПРИХОД</string>

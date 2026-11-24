@@ -130,8 +130,17 @@ abstract class BaseScanActivity : AppCompatActivity() {
                 "accepted" to sent
             )
         )
+        if (sent) {
+            onBarcodeEnqueued(sanitized)
+        }
         return sent
     }
+
+    /**
+     * Called after a sanitized barcode is accepted into the sequential queue.
+     * Screens can use it for session UI. Business handling stays in [onBarcodeScannedSequential].
+     */
+    protected open fun onBarcodeEnqueued(barcode: String) = Unit
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
     private fun registerScanReceivers() {

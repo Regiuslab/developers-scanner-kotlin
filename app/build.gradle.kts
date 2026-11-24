@@ -102,6 +102,8 @@ dependencies {
     implementation(libs.retrofit)
     implementation(libs.gson)
     implementation(libs.retrofit.gson.converter)
+    // XCheng scan-service client. Apache 2.0, see app/libs/xcscanner-LICENSE.txt.
+    implementation(files("libs/xcscanner_qrcode_v1.3.56.1.14-release.aar"))
     testImplementation(libs.junit)
     testImplementation(libs.mockito.core)
     androidTestImplementation(libs.androidx.junit)
