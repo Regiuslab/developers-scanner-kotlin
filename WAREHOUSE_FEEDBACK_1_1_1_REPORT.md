@@ -101,7 +101,10 @@
 
 ## GitHub Release
 
-Ссылка будет добавлена после публикации тега `v1.1.1-tsd-pilot`. Если публикация не удалась, в этом разделе останется фактическая причина.
+https://github.com/Regiuslab/developers-scanner-kotlin/releases/tag/v1.1.1-tsd-pilot
+
+Коммит `14a568b2d902895873ead321e5adb6b9ab6ed7eb`.  
+В релизе: `tsd-1.1.1-release.apk`, `tsd-1.1.1-debug.apk`, `SHA256SUMS.txt`. Релиз помечен как prerelease.
 
 ## Ограничения
 
