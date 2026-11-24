@@ -8,8 +8,12 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Looper
 import android.util.Log
+import android.view.KeyEvent
 import android.view.View
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
@@ -34,6 +38,7 @@ import com.example.scannerkotlin.service.CatalogDocumentMovingService
 import com.example.scannerkotlin.utils.BaseScanActivity
 import com.example.scannerkotlin.utils.BarcodeScanGate
 import com.example.scannerkotlin.utils.MovingAvailabilityDisplay
+import com.example.scannerkotlin.utils.MovingBarcodeLookup
 import com.example.scannerkotlin.utils.MovingConductRetrySync
 import com.example.scannerkotlin.utils.MovingDocumentDraftManager
 import com.example.scannerkotlin.utils.MovingDocumentStateMerger
@@ -53,6 +58,8 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
 
 
     private lateinit var btnSave: Button
+    private lateinit var btnFindBarcode: Button
+    private lateinit var etManualBarcode: EditText
     private lateinit var recyclerView: RecyclerView
     private lateinit var progressBar: ProgressBar
     private lateinit var adapter: ProductMovingAdapter
@@ -82,11 +89,7 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
 
     
     override fun onBarcodeScanned(barcode: String) {
-        if (!scanGate.tryAcquire(barcode)) {
-            Log.d("ProductsActivity", "Scan skipped by gate: $barcode")
-            return
-        }
-        processBarcodeScan(barcode)
+        submitBarcode(barcode, fromManualField = false)
     }
 
 
@@ -218,6 +221,8 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
     private fun initializeViews() {
 
         btnSave = findViewById(R.id.btnMovingSave)
+        btnFindBarcode = findViewById(R.id.btnFindBarcode)
+        etManualBarcode = findViewById(R.id.etManualBarcode)
         recyclerView = findViewById(R.id.rvMovingProducts)
         progressBar = findViewById(R.id.progressBar)
         emptyProductMovingTextView = findViewById(R.id.emptyProductMovingTextView)
@@ -244,6 +249,53 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
 
     private fun setupButtonClickListeners() {
         btnSave.setOnClickListener { handleSaveButtonClick() }
+        btnFindBarcode.setOnClickListener {
+            submitBarcode(etManualBarcode.text?.toString(), fromManualField = true)
+        }
+        etManualBarcode.setOnEditorActionListener { _, actionId, event ->
+            val isSubmit = actionId == EditorInfo.IME_ACTION_SEARCH ||
+                actionId == EditorInfo.IME_ACTION_DONE ||
+                actionId == EditorInfo.IME_ACTION_GO ||
+                actionId == EditorInfo.IME_ACTION_SEND ||
+                (event?.keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN)
+            if (isSubmit) {
+                submitBarcode(etManualBarcode.text?.toString(), fromManualField = true)
+                true
+            } else {
+                false
+            }
+        }
+        etManualBarcode.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_ENTER && event.action == KeyEvent.ACTION_DOWN) {
+                submitBarcode(etManualBarcode.text?.toString(), fromManualField = true)
+                true
+            } else {
+                false
+            }
+        }
+    }
+
+    /**
+     * Hardware scans and the manual field share this entry point:
+     * the same normalization, the same in-flight gate, and [processBarcodeScan].
+     */
+    private fun submitBarcode(raw: String?, fromManualField: Boolean) {
+        val normalized = MovingBarcodeLookup.normalize(raw)
+        if (normalized.isNullOrBlank()) {
+            if (fromManualField) {
+                Toast.makeText(this, getString(R.string.moving_barcode_empty), Toast.LENGTH_SHORT).show()
+            }
+            return
+        }
+        if (!scanGate.tryAcquire(normalized)) {
+            Log.d("ProductsActivity", "Barcode skipped by gate: $normalized")
+            return
+        }
+        if (fromManualField) {
+            val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            imm?.hideSoftInputFromWindow(etManualBarcode.windowToken, 0)
+        }
+        processBarcodeScan(normalized, fromManualField)
     }
 
     
@@ -386,21 +438,40 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
         }
     }
 
-    @SuppressLint("NotifyDataSetChanged") 
-    private fun addScannedProductToList(element: DocumentElement) {
-        
+    @SuppressLint("NotifyDataSetChanged")
+    private fun addScannedProductToList(element: DocumentElement): Boolean {
         if (elements.none { it.elementId == element.elementId }) {
             elements.add(0, element)
-            newProductInDocument.add(element) 
-            
-            
+            newProductInDocument.add(element)
             adapter.notifyDataSetChanged()
             recyclerView.scrollToPosition(0)
             updateEmptyStateVisibility()
             updateSaveButtonState()
             Log.d("ProductsActivity", "Added scanned element: ${element.name}. New list size: ${newProductInDocument.size}")
+            return true
+        }
+        showAlertInfo("Этот товар уже отсканирован")
+        return false
+    }
+
+    private fun presentFoundProduct(
+        product: Product,
+        storeAmounts: List<StoreAmountResponse.StoreProduct>?,
+        currentIdDocument: Long,
+        fromManualField: Boolean
+    ) {
+        val element = mapper.map(product, currentIdDocument)
+        if (elements.none { it.elementId == element.elementId }) {
+            Log.d("ProductsActivity", "Product not in list. Showing confirmation dialog for ${element.name}")
+            showAlertScanInfo(element, storeAmounts) {
+                Log.d("ProductsActivity", "Add confirmed for ${element.name}")
+                if (addScannedProductToList(element) && fromManualField) {
+                    etManualBarcode.setText("")
+                }
+            }
         } else {
-            showAlertInfo("Этот товар уже отсканирован")
+            Log.d("ProductsActivity", "Product ${element.name} already in list.")
+            showAlertInfo("Этот товар уже добавлен")
         }
     }
 
@@ -505,7 +576,7 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
     
 
     
-    private fun processBarcodeScan(barcode: String) {
+    private fun processBarcodeScan(barcode: String, fromManualField: Boolean) {
         val currentIdDocument = idDocumentLong
         if (currentIdDocument == null) {
             scanGate.release()
@@ -518,6 +589,7 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
         lifecycleScope.launch {
             var fetchedProduct: Product? = null
             var fetchedStoreAmounts: List<StoreAmountResponse.StoreProduct>? = null
+            var ambiguousChoices: List<Pair<Product, List<StoreAmountResponse.StoreProduct>>>? = null
             var failureMessage: String? = null
 
             try {
@@ -532,67 +604,54 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
                     failureMessage = MovingAvailabilityDisplay.STORES_NOT_LOADED_ALERT
                 }
 
-                val productId = if (failureMessage == null) withContext(Dispatchers.IO) {
+                val lookupRaw = if (failureMessage == null) withContext(Dispatchers.IO) {
                     Log.d("ProductsActivity", "[IO] Getting product ID for barcode $barcode")
-                    val response = apiBitrix.getProductIdByBarcode(barcode) 
-
+                    val response = apiBitrix.getProductIdByBarcode(barcode)
                     if (response.isSuccessful) {
-                        
-                        val resultId = response.body()?.result?.trim() 
-
-                        if (!resultId.isNullOrEmpty()) {
-                            
-                            Log.d("ProductsActivity", "[IO] Product ID found: $resultId")
-                            resultId 
-                        } else {
-                            
-                            Log.w("ProductsActivity", "[IO] getProductIdByBarcode successful but result is null/empty for barcode $barcode.")
-                            failureMessage = "Товар по штрихкоду '$barcode' не найден."
-                            null 
-                        }
+                        response.body()?.result
                     } else {
-                        
                         Log.w("ProductsActivity", "[IO] getProductIdByBarcode failed with code: ${response.code()}")
-                        
                         failureMessage = "Ошибка при поиске штрихкода (${response.code()})."
-                        null 
+                        null
                     }
-                } else null
+                } else {
+                    null
+                }
 
-                
-                if (productId != null) {
-                    
-                    fetchedProduct = withContext(Dispatchers.IO) {
-                        Log.d("ProductsActivity", "[IO] Getting product details for ID $productId")
-                        val request = ProductIdRequest(id = productId)
-                        val response = apiBitrix.getProductById(request)
-                        if (response.isSuccessful) {
-                            val details = response.body()?.result?.get("product") as? LinkedTreeMap<*, *>
-                            details?.let { productMapper.mapToProduct(it) }?.also {
-                                Log.d("ProductsActivity", "[IO] Product details fetched: ${it.name}")
+                if (failureMessage == null) {
+                    when (val match = MovingBarcodeLookup.parseProductIds(lookupRaw)) {
+                        MovingBarcodeLookup.Match.NotFound -> {
+                            Log.w("ProductsActivity", "[IO] barcode '$barcode' was not found. raw=$lookupRaw")
+                            failureMessage = getString(R.string.moving_barcode_not_found, barcode)
+                        }
+                        is MovingBarcodeLookup.Match.Single -> {
+                            val productIdInt = match.productId.toIntOrNull()
+                            val loaded = if (productIdInt == null) null else loadProductForBarcode(match.productId)
+                            fetchedProduct = loaded
+                            if (loaded == null || productIdInt == null) {
+                                failureMessage = "Не удалось получить детали товара (ID: ${match.productId})."
+                            } else {
+                                fetchedStoreAmounts = service.getStoreForScan(productIdInt)
                             }
-                        } else {
-                            Log.w("ProductsActivity", "[IO] getProductById failed for $productId: ${response.code()}")
-                            failureMessage = "Не удалось получить детали товара (ID: $productId)."
-                            null 
+                        }
+                        is MovingBarcodeLookup.Match.Ambiguous -> {
+                            val choices = mutableListOf<Pair<Product, List<StoreAmountResponse.StoreProduct>>>()
+                            for (productId in match.productIds) {
+                                val loaded = loadProductForBarcode(productId) ?: continue
+                                val amounts = productId.toIntOrNull()?.let { service.getStoreForScan(it) }.orEmpty()
+                                choices.add(loaded to amounts)
+                            }
+                            if (choices.isEmpty()) {
+                                failureMessage = getString(R.string.moving_barcode_ambiguous, barcode)
+                            } else if (choices.size == 1) {
+                                fetchedProduct = choices.first().first
+                                fetchedStoreAmounts = choices.first().second
+                            } else {
+                                ambiguousChoices = choices
+                            }
                         }
                     }
                 }
-
-                
-                if (fetchedProduct != null && productId != null) { 
-                    
-                    val productIdInt = productId.toIntOrNull()
-                    if (productIdInt != null) {
-                        Log.d("ProductsActivity", "Getting store amounts for product ID $productIdInt")
-                        fetchedStoreAmounts = service.getStoreForScan(productIdInt)
-                        Log.d("ProductsActivity", "Fetched ${fetchedStoreAmounts.size} store amount records.")
-                    } else {
-                        Log.w("ProductsActivity", "Invalid product ID format for store scan: $productId")
-                    }
-                }
-
-                
             } catch (ioe: IOException) {
                 Log.e("ProductsActivity", "Network error processing barcode $barcode", ioe)
                 failureMessage = "Ошибка сети при обработке штрихкода."
@@ -601,38 +660,53 @@ class ProductsDocumentMovingActivity : BaseScanActivity() {
                 failureMessage = "Непредвиденная ошибка при обработке штрихкода."
             }
 
-            
             withContext(Dispatchers.Main) {
-                progressBar.visibility = View.GONE 
+                progressBar.visibility = View.GONE
 
                 if (!isActive) {
                     Log.w("ProductsActivity", "Coroutine cancelled, skipping UI update for barcode $barcode")
                     return@withContext
                 }
 
-                if (fetchedProduct != null) {
-                    
-                    val element = mapper.map(fetchedProduct, currentIdDocument)
-
-                    if (elements.none { it.elementId == element.elementId }) {
-                        Log.d("ProductsActivity", "Product not in list. Showing confirmation dialog for ${element.name}")
-                        showAlertScanInfo(element, fetchedStoreAmounts) {
-                            Log.d("ProductsActivity", "Add confirmed for ${element.name}")
-                            addScannedProductToList(element)
-                        }
-                    } else {
-                        Log.d("ProductsActivity", "Product ${element.name} already in list.")
-                        showAlertInfo("Этот товар уже добавлен")
+                val singleProduct = fetchedProduct
+                val choices = ambiguousChoices
+                val messageToShow = failureMessage
+                when {
+                    singleProduct != null -> {
+                        presentFoundProduct(singleProduct, fetchedStoreAmounts, currentIdDocument, fromManualField)
                     }
-                } else if (failureMessage != null) {
-                    
-                    Log.w("ProductsActivity", "Scan processing failed or product not found: $failureMessage")
-                    showAlertInfo(failureMessage!!) 
+                    choices != null -> {
+                        showAlert(
+                            getString(R.string.moving_barcode_ambiguous, barcode),
+                            choices.map { it.first }
+                        ) { selected ->
+                            if (selected == null) return@showAlert
+                            val amounts = choices.firstOrNull { it.first.id == selected.id }?.second
+                            presentFoundProduct(selected, amounts, currentIdDocument, fromManualField)
+                        }
+                    }
+                    messageToShow != null -> {
+                        Log.w("ProductsActivity", "Scan processing failed or product not found: $messageToShow")
+                        showAlertInfo(messageToShow)
+                    }
                 }
-                
-            } 
+            }
             scanGate.release()
-        } 
+        }
+    }
+
+    private suspend fun loadProductForBarcode(productId: String): Product? = withContext(Dispatchers.IO) {
+        Log.d("ProductsActivity", "[IO] Getting product details for ID $productId")
+        val request = ProductIdRequest(id = productId)
+        val response = apiBitrix.getProductById(request)
+        if (!response.isSuccessful) {
+            Log.w("ProductsActivity", "[IO] getProductById failed for $productId: ${response.code()}")
+            return@withContext null
+        }
+        val details = response.body()?.result?.get("product") as? LinkedTreeMap<*, *>
+        details?.let { productMapper.mapToProduct(it) }?.also {
+            Log.d("ProductsActivity", "[IO] Product details fetched: ${it.name}")
+        }
     }
 
 

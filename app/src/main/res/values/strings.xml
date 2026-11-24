@@ -33,6 +33,12 @@
     <string name="btnAddProduct">Добавить товар</string>
     <string name="btnSave">Сохранить и провести учет</string>
     <string name="btnMovingSave">Провести</string>
+    <string name="moving_barcode_label">Штрихкод товара</string>
+    <string name="moving_barcode_hint">Введите или отсканируйте штрихкод</string>
+    <string name="moving_barcode_find">Найти / Добавить</string>
+    <string name="moving_barcode_empty">Введите штрихкод</string>
+    <string name="moving_barcode_not_found">Товар по штрихкоду «%1$s» не найден.</string>
+    <string name="moving_barcode_ambiguous">По штрихкоду «%1$s» найдено несколько товаров. Выберите нужный.</string>
     <string name="quantity">Количество</string>
     <string name="barcode">Штрихкод</string>
     <string name="AddDocumentMoving">Добавить документ</string>

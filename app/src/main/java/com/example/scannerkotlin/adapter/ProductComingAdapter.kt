@@ -20,7 +20,7 @@ import com.example.scannerkotlin.R
 import com.example.scannerkotlin.model.ComingSyncState
 import com.example.scannerkotlin.model.Product
 import com.example.scannerkotlin.utils.BarcodeSanitizer
-import java.util.Locale
+import com.example.scannerkotlin.utils.ComingQuantityDisplay
 
 class ProductComingAdapter(
     private val productList: MutableList<Product>,
@@ -462,18 +462,12 @@ class ProductComingAdapter(
         }
 
         private fun formatQuantityText(product: Product): String {
-            val currentQuantity = product.quantity ?: return ""
-            return if (product.measureName == "Штука") {
-                etQuantity.inputType = InputType.TYPE_CLASS_NUMBER
-                currentQuantity.toInt().toString()
+            etQuantity.inputType = if (ComingQuantityDisplay.allowsFraction(product.measureName)) {
+                InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
             } else {
-                etQuantity.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL
-                if (currentQuantity % 1.0 == 0.0) {
-                    currentQuantity.toInt().toString()
-                } else {
-                    String.format(Locale.US, "%.3f", currentQuantity).trimEnd('0').trimEnd('.')
-                }
+                InputType.TYPE_CLASS_NUMBER
             }
+            return ComingQuantityDisplay.format(product.quantity, product.measureName)
         }
 
         fun updateBarcodeOnly(product: Product) {
@@ -555,13 +549,10 @@ class ProductComingAdapter(
                         currentProduct.measureName = normalizedMeasure
                         currentProduct.validationError = null
                         currentProduct.syncState = ComingSyncState.LOCAL_DIRTY
-                        if (normalizedMeasure == "Штука") {
-                            currentProduct.quantity?.let { qty ->
-                                if (qty % 1.0 != 0.0) {
-                                    currentProduct.quantity = qty.toInt().toDouble()
-                                }
-                            }
-                        }
+                        currentProduct.quantity = ComingQuantityDisplay.afterMeasureChange(
+                            currentProduct.quantity,
+                            normalizedMeasure
+                        )
                         updateQuantityOnly(currentProduct)
                         onDataChangedListener?.invoke()
                     }

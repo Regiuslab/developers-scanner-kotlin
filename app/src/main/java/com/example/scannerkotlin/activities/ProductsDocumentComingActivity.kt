@@ -33,7 +33,6 @@ import com.example.scannerkotlin.service.CatalogDocumentComingService
 import com.example.scannerkotlin.utils.BarcodeScanGate
 import com.example.scannerkotlin.utils.BarcodeSanitizer
 import com.example.scannerkotlin.utils.BaseScanActivity
-import com.example.scannerkotlin.utils.ComingMeasureAutoResolver
 import com.example.scannerkotlin.utils.ComingProductCopyFactory
 import com.example.scannerkotlin.utils.ComingProductValidator
 import com.example.scannerkotlin.utils.InFlightGuard
@@ -451,17 +450,10 @@ class ProductsDocumentComingActivity : BaseScanActivity() {
      */
     @SuppressLint("NotifyDataSetChanged")
     private suspend fun addNewProductAndPersist(selectedTemplate: Product) {
-        val detached = selectedTemplate.detachedCopy(preserveLocalItemId = false).apply {
-            idInDocument = null
-            offerId = null
-            destinationStoreId = this@ProductsDocumentComingActivity.destinationStoreId
-            measureName = ComingMeasureAutoResolver.resolve(this)
-            if (quantity == null || quantity == 0.0) {
-                quantity = 1.0
-            }
-            barcode = null
-            validationError = null
-        }
+        val detached = ComingProductCopyFactory.newManualPosition(
+            template = selectedTemplate,
+            destinationStoreId = destinationStoreId
+        )
 
         val docId = idDocument
         if (docId != null) {
@@ -538,10 +530,10 @@ class ProductsDocumentComingActivity : BaseScanActivity() {
     private fun handleItemCopy(position: Int) {
         if (position !in 0 until productList.size || isSaving) return
         val source = productList[position]
-        val clone = ComingProductCopyFactory.cloneWithoutValues(source).apply {
-            quantity = 1.0
-            destinationStoreId = this@ProductsDocumentComingActivity.destinationStoreId
-        }
+        val clone = ComingProductCopyFactory.newCopiedPosition(
+            source = source,
+            destinationStoreId = destinationStoreId
+        )
         val insertPosition = (position + 1).coerceAtMost(productList.size)
         productList.add(insertPosition, clone)
         adapter.notifyItemInserted(insertPosition)
@@ -672,11 +664,11 @@ class ProductsDocumentComingActivity : BaseScanActivity() {
                 ?: layoutManager.findFirstVisibleItemPosition().takeIf { it in 0 until productList.size }
                 ?: 0
             val template = productList[activeTemplatePos]
-            val newItem = ComingProductCopyFactory.cloneWithoutValues(template).apply {
-                quantity = 1.0
-                barcode = normalizedBarcode
-                destinationStoreId = this@ProductsDocumentComingActivity.destinationStoreId
-            }
+            val newItem = ComingProductCopyFactory.newScannedPosition(
+                template = template,
+                barcode = normalizedBarcode,
+                destinationStoreId = destinationStoreId
+            )
 
             if (docId != null) {
                 val outcome = draftRepository.saveAddedOrUpdatedItem(

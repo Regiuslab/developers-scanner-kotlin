@@ -119,7 +119,17 @@ object ComingProductValidator {
             }
 
             val qty = product.quantity
-            if (qty == null || qty.isNaN() || qty.isInfinite() || qty <= 0.0) {
+            if (qty == null) {
+                issues.add(
+                    ValidationIssue(
+                        positionIndex = index,
+                        localItemId = product.localItemId,
+                        productId = product.id,
+                        field = "quantity",
+                        message = "Позиция №$posNum ($title): Укажите количество"
+                    )
+                )
+            } else if (qty.isNaN() || qty.isInfinite() || qty <= 0.0) {
                 issues.add(
                     ValidationIssue(
                         positionIndex = index,
